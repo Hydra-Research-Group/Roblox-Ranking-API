@@ -1,14 +1,14 @@
 const express = require("express");
 const {
-    fetchMemberships,
-    fetchRoles,
+    fetchMembership,
+    fetchRoleByRank,
     updateRank
 } = require("./roblox-api");
 const {
     getMembership,
     saveMembership,
     getRoleByRank,
-    saveRoles,
+    saveRoleByRank,
     clearAllCaches
 } = require("./cache");
 require("dotenv").config();
@@ -23,24 +23,6 @@ app.get("/", (_, res) => {
     });
 });
 
-app.post("/refresh-roles/:groupId", async (req, res) => {
-    const { groupId } = req.params;
-
-    try {
-        const roles = await fetchRoles(groupId);
-        saveRoles(roles);
-
-        res.json({
-            message: "Roles cache refreshed",
-            groupId
-        });
-    } catch (error) {
-        res.status(500).json({
-            error: error.message
-        });
-    };
-});
-
 app.patch("/update-rank/:groupId", async (req, res) => {
     const { groupId } = req.params;
     const { userId, rank } = req.body;
@@ -48,12 +30,11 @@ app.patch("/update-rank/:groupId", async (req, res) => {
     try {
         let membershipId = getMembership(userId);
         if (!membershipId) {
-            const memberships = await fetchMemberships(groupId);
-            memberships.forEach((member) => {
-                saveMembership(member.user.split("/")[1], member.path.split("/")[3])
-            });
+            const membership = await fetchMembership(groupId, userId);
 
-            membershipId = getMembership(userId);
+            if (membership !== undefined) {
+                membershipId = saveMembership(membership.user.split("/")[1], membership.path.split("/")[3]);
+            };
         };
 
         if (!membershipId) {
@@ -64,10 +45,11 @@ app.patch("/update-rank/:groupId", async (req, res) => {
 
         let roleId = getRoleByRank(rank);
         if (!roleId) {
-            const roles = await fetchRoles(groupId);
-            saveRoles(roles);
+            const role = await fetchRoleByRank(groupId, rank);
 
-            roleId = getRoleByRank(rank);
+            if (role !== undefined) {
+                roleId = saveRoleByRank(role.rank, role.id);
+            };
         };
 
         if (!roleId) {
