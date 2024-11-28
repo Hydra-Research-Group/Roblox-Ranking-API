@@ -10,40 +10,30 @@ const apiClient = axios.create({
     }
 });
 
-async function fetchMemberships(groupId) {
-    let url = `${BASE_URL}/${groupId}/memberships?maxPageSize=100`;
-    let memberships = [];
-    let nextPageToken;
+async function fetchMembership(groupId, userId) {
+    const url = `${BASE_URL}/${groupId}/memberships?maxPageSize=1&filter=user=='users/${userId}'`;
 
-    do {
-        const response = await apiClient.get(url);
-        memberships = memberships.concat(response.data.groupMemberships);
-        nextPageToken = response.data.nextPageToken;
+    const response = await apiClient.get(url);
 
-        if (nextPageToken !== "") {
-            url = `${BASE_URL}/${groupId}/memberships?maxPageSize=100&pageToken=${nextPageToken}`;
-        }
-    } while (nextPageToken !== "");
-
-    return memberships;
+    return response.data.groupMemberships[0];
 };
 
-async function fetchRoles(groupId) {
+async function fetchRoleByRank(groupId, rank) {
     let url = `${BASE_URL}/${groupId}/roles?maxPageSize=100`;
-    let roles = [];
     let nextPageToken;
 
     do {
-        const response = await apiClient.get(url);
-        roles = roles.concat(response.data.groupRoles);
-        nextPageToken = response.data.nextPageToken;
+        const response = await apiClient.get(nextPageToken ? `${url}&pageToken=${nextPageToken}` : url);
 
-        if (nextPageToken !== "") {
-            url = `${BASE_URL}/${groupId}/roles?maxPageSize=100&pageToken=${nextPageToken}`;
-        }
+        const role = response.data.groupRoles.find(r => r.rank === rank);
+        if (role != null) {
+            return role;
+        };
+
+        nextPageToken = response.data.nextPageToken;
     } while (nextPageToken !== "");
 
-    return roles;
+    throw new Error("Role not found");
 };
 
 async function updateRank(groupId, membershipId, userId, roleId) {
@@ -52,12 +42,14 @@ async function updateRank(groupId, membershipId, userId, roleId) {
         user: `users/${userId}`,
         role: `groups/${groupId}/roles/${roleId}`
     };
+
     const response = await apiClient.patch(url, body);
+    
     return response.data;
 };
 
 module.exports = {
-    fetchMemberships,
-    fetchRoles,
+    fetchMembership,
+    fetchRoleByRank,
     updateRank
 };
