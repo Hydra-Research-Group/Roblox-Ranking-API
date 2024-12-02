@@ -9,7 +9,8 @@ const {
     saveMembership,
     getRoleByRank,
     saveRoleByRank,
-    clearAllCaches
+    clearAllCaches,
+    getCacheSizes
 } = require("./cache");
 require("dotenv").config();
 
@@ -18,8 +19,14 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (_, res) => {
+    const cacheSizes = getCacheSizes();
+
     res.json({
-        message: "Roblox Ranking API, developed by Hydra Research Group, is alive!"
+        message: "Roblox Ranking API, developed by Hydra Research Group, is alive!",
+        cacheSizes: {
+            memberships: cacheSizes.memberships,
+            roles: cacheSizes.roles
+        }
     });
 });
 
