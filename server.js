@@ -1,4 +1,5 @@
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const {
     fetchMembership,
     fetchRoleByRank,
@@ -14,8 +15,15 @@ const {
 } = require("./cache");
 require("dotenv").config();
 
+const limiter = rateLimit({
+    windowMs: 1 * 60 * 1000,
+    max: 40
+});
+
 const app = express();
 app.use(express.json());
+app.use(limiter);
+
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (_, res) => {
@@ -33,6 +41,12 @@ app.get("/", (_, res) => {
 app.patch("/update-rank/:groupId", async (req, res) => {
     const { groupId } = req.params;
     const { userId, rank } = req.body;
+
+    if (!groupId || !userId || !rank) {
+        return res.status(400).json({
+            error: "Invalid request"
+        });
+    };
 
     try {
         let membershipId = getMembership(userId);
