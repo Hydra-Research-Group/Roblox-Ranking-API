@@ -10,9 +10,9 @@ const {
     saveMembership,
     getRoleByRank,
     saveRoleByRank,
-    clearAllCaches,
-    getCacheSizes
+    clearAllCaches
 } = require("./cache");
+const logger = require("./logger");
 require("dotenv").config();
 
 const limiter = rateLimit({
@@ -27,15 +27,7 @@ app.use(limiter);
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (_, res) => {
-    const cacheSizes = getCacheSizes();
-
-    res.json({
-        message: "Roblox Ranking API, developed by Hydra Research Group, is alive!",
-        cacheSizes: {
-            memberships: cacheSizes.memberships,
-            roles: cacheSizes.roles
-        }
-    });
+    res.send("Roblox Ranking API, created by https://github.com/orgs/Hydra-Research-Group");
 });
 
 app.patch("/update-rank/:groupId", async (req, res) => {
@@ -43,6 +35,8 @@ app.patch("/update-rank/:groupId", async (req, res) => {
     const { userId, rank } = req.body;
 
     if (!groupId || !userId || !rank) {
+        logger.warn(`Invalid request received for groupId: ${groupId}, userId: ${userId}, rank: ${rank}`);
+
         return res.status(400).json({
             error: "Invalid request"
         });
@@ -55,10 +49,14 @@ app.patch("/update-rank/:groupId", async (req, res) => {
 
             if (membership !== undefined) {
                 membershipId = saveMembership(membership.user.split("/")[1], membership.path.split("/")[3]);
+            } else {
+                logger.error(`Failed to fetch membership for userId: ${userId}`);
             };
         };
 
         if (!membershipId) {
+            logger.warn(`Membership not found for userId: ${userId}`);
+
             return res.status(404).json({
                 error: "Membership not found"
             });
@@ -70,10 +68,14 @@ app.patch("/update-rank/:groupId", async (req, res) => {
 
             if (role !== undefined) {
                 roleId = saveRoleByRank(role.rank, role.id);
+            } else {
+                logger.error(`Failed to fetch role for rank: ${rank}`);
             };
         };
 
         if (!roleId) {
+            logger.warn(`Role not found for rank: ${rank}`);
+
             return res.status(404).json({
                 error: "Role not found"
             });
@@ -82,6 +84,8 @@ app.patch("/update-rank/:groupId", async (req, res) => {
         const response = await updateRank(groupId, membershipId, userId, roleId);
         res.json(response);
     } catch (error) {
+        logger.error(`Error updating rank for userId: ${userId} - ${error.message}`);
+
         res.status(500).json({
             error: error.message
         });
@@ -90,10 +94,10 @@ app.patch("/update-rank/:groupId", async (req, res) => {
 
 app.post("/clear-cache", async (_, res) => {
     clearAllCaches();
-    
+
     res.json({
         message: "All caches cleared"
     });
 });
 
-app.listen(PORT, () => console.log(`API is running on port ${PORT}`));
+app.listen(PORT, () => logger.info(`API is running on port ${PORT}`));

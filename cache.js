@@ -28,18 +28,10 @@ function clearAllCaches() {
     rolesCache.flushAll();
 };
 
-function getCacheSizes() {
-    return {
-        memberships: membershipsCache.keys().length,
-        roles: rolesCache.keys().length
-    }
-};
-
 module.exports = {
     getMembership,
     saveMembership,
     getRoleByRank,
     saveRoleByRank,
-    clearAllCaches,
-    getCacheSizes
+    clearAllCaches
 };
