@@ -1,4 +1,5 @@
 const express = require("express");
+const axios = require("axios");
 const rateLimit = require("express-rate-limit");
 const {
     fetchMembership,
@@ -98,6 +99,38 @@ app.post("/clear-cache", async (_, res) => {
     res.json({
         message: "All caches cleared"
     });
+});
+
+const SendStartupLog = async () => {
+    try {
+        await axios.post(process.env.GUILDED_WEBHOOK, {
+            content: "**[STARTED]**\nThe API has started successfully."
+        });
+    } catch (error) {
+        logger.error(`Error sending startup log to webhook: ${error.message}`);
+    };
+};
+const SendShutdownLog = async () => {
+    try {
+        await axios.post(process.env.GUILDED_WEBHOOK, {
+            content: "**[STOPPING]**\nThe API is shutting down."
+        });
+    } catch (error) {
+        logger.error(`Error sending shutdown log to webhook: ${error.message}`);
+    };
+};
+
+SendStartupLog();
+
+process.on("SIGINT", async () => {
+    logger.info("Received SIGINT, shutting down...");
+    await SendShutdownLog();
+    process.exit(0);
+});
+process.on("SIGTERM", async () => {
+    logger.info("Received SIGTERM, shutting down...");
+    await SendShutdownLog();
+    process.exit(0);
 });
 
 app.listen(PORT, () => logger.info(`API is running on port ${PORT}`));
