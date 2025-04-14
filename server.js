@@ -14,6 +14,10 @@ const {
     clearAllCaches
 } = require("./cache");
 const logger = require("./logger");
+const {
+    accessKeyAuth,
+    adminKeyAuth
+} = require("./middleware/keyAuth");
 require("dotenv").config();
 
 const limiter = rateLimit({
@@ -31,7 +35,7 @@ app.get("/", (_, res) => {
     res.send("Roblox Ranking API, created by https://github.com/orgs/Hydra-Research-Group");
 });
 
-app.patch("/update-rank/:groupId", async (req, res) => {
+app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
     const { groupId } = req.params;
     const { userId, rank } = req.body;
 
@@ -93,7 +97,7 @@ app.patch("/update-rank/:groupId", async (req, res) => {
     };
 });
 
-app.post("/clear-cache", async (_, res) => {
+app.post("/clear-cache", adminKeyAuth, async (_, res) => {
     clearAllCaches();
 
     res.json({
