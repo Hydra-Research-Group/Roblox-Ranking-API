@@ -1,7 +1,7 @@
 const NodeCache = require("node-cache");
 
 const membershipsCache = new NodeCache({ stdTTL: 600, checkperiod: 60 }); // Memberships stays 10 minutes in cache
-const rolesCache = new NodeCache({ stdTTL: 1200, checkperiod: 120 }); // Roles stays 20 minutes in cache
+const rolesCache = new NodeCache({ stdTTL: 1800, checkperiod: 180 }); // Roles stays 30 minutes in cache
 
 function getMembership(userId) {
     return membershipsCache.get(userId);
