@@ -18,6 +18,7 @@ const {
     accessKeyAuth,
     adminKeyAuth
 } = require("./middleware/keyAuth");
+const { proxyValidator } = require("./middleware/proxyValidator");
 require("dotenv").config();
 
 const limiter = rateLimit({
@@ -96,6 +97,23 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
             error: error.message
         });
     };
+});
+
+app.post("/proxy-webhook/:system", accessKeyAuth, proxyValidator, async (req, res) => {
+    try {
+        const { webhookUrl } = req;
+
+        await axios.post(webhookUrl, req.body);
+
+        res.json({
+            message: "Message proxied successfully"
+        });
+    } catch (error) {
+        logger.error(`Error proxying request: ${error.message}`);
+        res.status(500).json({
+            error: "Failed to proxy request"
+        });
+    }
 });
 
 app.post("/clear-cache", adminKeyAuth, async (_, res) => {
