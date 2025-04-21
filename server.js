@@ -28,6 +28,7 @@ const limiter = rateLimit({
 const app = express();
 app.use(express.json());
 app.use(limiter);
+app.disable("x-powered-by");
 
 const PORT = process.env.PORT || 3000;
 
