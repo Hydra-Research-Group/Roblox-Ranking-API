@@ -41,12 +41,32 @@ app.use(express.json());
 app.use(limiter);
 app.disable("x-powered-by");
 
-app.use((_, _, next) => {
+app.use((req, res, next) => {
     totalRequests++;
     next();
 });
 
 const PORT = process.env.PORT || 3000;
+
+async function sendWithRetry(url, payload, maxAttempts = 5, delayMs = 2000) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            await axios.post(url, payload);
+
+            logger.info(`Ranking log sent successfully on attempt ${attempt}`);
+
+            return;
+        } catch (error) {
+            logger.warn(`Attempt ${attempt} failed to send ranking log: ${error.message}`);
+
+            if (attempt < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            } else {
+                logger.error("All attempts to send ranking log failed.");
+            };
+        };
+    };
+};
 
 const fetchUsername = async (userId) => {
     const url = `https://users.roblox.com/v1/users/${userId}`;
@@ -131,6 +151,8 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
 
         const response = await updateRank(groupId, membershipId, userId, roleId);
 
+        res.json(response);
+
         try {
             if (process.env.RANKING_WEBHOOK) {
                 const [username, groupName] = await Promise.all([
@@ -138,17 +160,15 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
                     fetchGroupName(groupId)
                 ]);
 
-                const roleDisplay = role ? role.name : `Rank ${rank}`;
+                const roleDisplay = role ? role.displayName : `Rank ${rank}`;
 
-                await axios.post(process.env.RANKING_WEBHOOK, {
+                await sendWithRetry(process.env.RANKING_WEBHOOK, {
                     content: `✅ Ranked **${username}** to **${roleDisplay}** in **${groupName}**.`
                 });
-            }
-        } catch (e) {
-            logger.error(`Failed to send ranking log: ${e.message}`);
-        }
-
-        res.json(response);
+            };
+        } catch (error) {
+            logger.error(`Unexpected error while preparing ranking log: ${error.message}`);
+        };
     } catch (error) {
         logger.error(`Error updating rank for userId: ${userId} - ${error.message}`);
 
