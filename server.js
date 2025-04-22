@@ -14,6 +14,11 @@ const {
     clearAllCaches
 } = require("./cache");
 const logger = require("./logger");
+const {
+    accessKeyAuth,
+    adminKeyAuth
+} = require("./middleware/keyAuth");
+const { proxyValidator } = require("./middleware/proxyValidator");
 require("dotenv").config();
 
 const limiter = rateLimit({
@@ -21,22 +26,65 @@ const limiter = rateLimit({
     max: 40
 });
 
+let totalRequests = 0;
+let apiStartTime = Date.now();
+
+let metrics = {
+    membershipHits: 0,
+    membershipMisses: 0,
+    roleHits: 0,
+    roleMisses: 0
+};
+
 const app = express();
 app.use(express.json());
 app.use(limiter);
+app.disable("x-powered-by");
+
+app.use((req, res, next) => {
+    totalRequests++;
+    next();
+});
 
 const PORT = process.env.PORT || 3000;
+const GROUP_ID = process.env.GROUP_ID;
+
+async function sendWithRetry(url, payload, maxAttempts = 5, delayMs = 2000) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            await axios.post(url, payload);
+
+            logger.info(`Ranking log sent successfully on attempt ${attempt}`);
+
+            return;
+        } catch (error) {
+            logger.warn(`Attempt ${attempt} failed to send ranking log: ${error.message}`);
+
+            if (attempt < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            } else {
+                logger.error("All attempts to send ranking log failed.");
+            };
+        };
+    };
+};
+
+async function fetchUsername(userId) {
+    const url = `https://users.roblox.com/v1/users/${userId}`;
+    const res = await axios.get(url);
+
+    return res.data.name;
+};
 
 app.get("/", (_, res) => {
     res.send("Roblox Ranking API, created by https://github.com/orgs/Hydra-Research-Group");
 });
 
-app.patch("/update-rank/:groupId", async (req, res) => {
-    const { groupId } = req.params;
+app.patch("/update-rank", accessKeyAuth, async (req, res) => {
     const { userId, rank } = req.body;
 
-    if (!groupId || !userId || !rank) {
-        logger.warn(`Invalid request received for groupId: ${groupId}, userId: ${userId}, rank: ${rank}`);
+    if (!userId || !rank) {
+        logger.warn(`Invalid request received: userId: ${userId}, rank: ${rank}`);
 
         return res.status(400).json({
             error: "Invalid request"
@@ -45,8 +93,13 @@ app.patch("/update-rank/:groupId", async (req, res) => {
 
     try {
         let membershipId = getMembership(userId);
-        if (!membershipId) {
-            const membership = await fetchMembership(groupId, userId);
+
+        if (membershipId) {
+            metrics.membershipHits++;
+        } else {
+            metrics.membershipMisses++;
+
+            const membership = await fetchMembership(GROUP_ID, userId);
 
             if (membership !== undefined) {
                 membershipId = saveMembership(membership.user.split("/")[1], membership.path.split("/")[3]);
@@ -63,12 +116,21 @@ app.patch("/update-rank/:groupId", async (req, res) => {
             });
         };
 
-        let roleId = getRoleByRank(rank);
-        if (!roleId) {
-            const role = await fetchRoleByRank(groupId, rank);
+        let role = getRoleByRank(rank);
+        let roleId;
+
+        if (role) {
+            metrics.roleHits++;
+
+            roleId = role.id;
+        } else {
+            metrics.roleMisses++;
+
+            role = await fetchRoleByRank(GROUP_ID, rank);
 
             if (role !== undefined) {
-                roleId = saveRoleByRank(role.rank, role.id);
+                role = saveRoleByRank(role.rank, role);
+                roleId = role.id;
             } else {
                 logger.error(`Failed to fetch role for rank: ${rank}`);
             };
@@ -82,8 +144,25 @@ app.patch("/update-rank/:groupId", async (req, res) => {
             });
         };
 
-        const response = await updateRank(groupId, membershipId, userId, roleId);
+        const response = await updateRank(GROUP_ID, membershipId, userId, roleId);
+
         res.json(response);
+
+        try {
+            if (process.env.RANKING_WEBHOOK) {
+                const [username] = await Promise.all([
+                    fetchUsername(userId)
+                ]);
+
+                const roleDisplay = role ? role.displayName : rank;
+
+                await sendWithRetry(process.env.RANKING_WEBHOOK, {
+                    content: `**${username}** has been ranked to rank **${roleDisplay}**!`
+                });
+            };
+        } catch (error) {
+            logger.error(`Unexpected error while preparing ranking log: ${error.message}`);
+        };
     } catch (error) {
         logger.error(`Error updating rank for userId: ${userId} - ${error.message}`);
 
@@ -93,7 +172,44 @@ app.patch("/update-rank/:groupId", async (req, res) => {
     };
 });
 
-app.post("/clear-cache", async (_, res) => {
+app.post("/proxy-webhook/:system", accessKeyAuth, proxyValidator, async (req, res) => {
+    try {
+        const { webhookUrl } = req;
+
+        await axios.post(webhookUrl, req.body);
+
+        res.json({
+            message: "Message proxied successfully"
+        });
+    } catch (error) {
+        logger.error(`Error proxying request: ${error.message}`);
+
+        res.status(500).json({
+            error: "Failed to proxy request"
+        });
+    };
+});
+
+app.get("/metrics", adminKeyAuth, (_, res) => {
+    const uptimeSeconds = Math.floor((Date.now() - apiStartTime) / 1000);
+
+    res.json({
+        uptime: `${uptimeSeconds} seconds`,
+        totalRequests,
+        cache: {
+            membership: {
+                hits: metrics.membershipHits,
+                misses: metrics.membershipMisses
+            },
+            role: {
+                hits: metrics.roleHits,
+                misses: metrics.roleMisses
+            }
+        }
+    });
+});
+
+app.post("/clear-cache", adminKeyAuth, async (_, res) => {
     clearAllCaches();
 
     res.json({
@@ -103,8 +219,8 @@ app.post("/clear-cache", async (_, res) => {
 
 const SendStartupLog = async () => {
     try {
-        await axios.post(process.env.GUILDED_WEBHOOK, {
-            content: "**[STARTED]**\nThe API is now active."
+        await axios.post(process.env.STATUS_WEBHOOK, {
+            content: "**[STARTED]** The API is now active."
         });
     } catch (error) {
         logger.error(`Error sending startup log to webhook: ${error.message}`);
