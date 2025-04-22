@@ -48,6 +48,18 @@ app.use((_, _, next) => {
 
 const PORT = process.env.PORT || 3000;
 
+const fetchUsername = async (userId) => {
+    const url = `https://users.roblox.com/v1/users/${userId}`;
+    const res = await axios.get(url);
+    return res.data.name;
+};
+
+const fetchGroupName = async (groupId) => {
+    const url = `https://groups.roblox.com/v1/groups/${groupId}`;
+    const res = await axios.get(url);
+    return res.data.name;
+};
+
 app.get("/", (_, res) => {
     res.send("Roblox Ranking API, created by https://github.com/orgs/Hydra-Research-Group");
 });
@@ -89,17 +101,21 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
             });
         };
 
-        let roleId = getRoleByRank(rank);
+        let role = getRoleByRank(rank);
+        let roleId;
 
-        if (roleId) {
+        if (role) {
             metrics.roleHits++;
+
+            roleId = role.id;
         } else {
             metrics.roleMisses++;
 
-            const role = await fetchRoleByRank(groupId, rank);
+            role = await fetchRoleByRank(groupId, rank);
 
             if (role !== undefined) {
-                roleId = saveRoleByRank(role.rank, role.id);
+                role = saveRoleByRank(role.rank, role);
+                roleId = role.id;
             } else {
                 logger.error(`Failed to fetch role for rank: ${rank}`);
             };
@@ -114,6 +130,23 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
         };
 
         const response = await updateRank(groupId, membershipId, userId, roleId);
+
+        try {
+            if (process.env.RANKING_WEBHOOK) {
+                const [username, groupName] = await Promise.all([
+                    fetchUsername(userId),
+                    fetchGroupName(groupId)
+                ]);
+
+                const roleDisplay = role ? role.name : `Rank ${rank}`;
+
+                await axios.post(process.env.RANKING_WEBHOOK, {
+                    content: `✅ Ranked **${username}** to **${roleDisplay}** in **${groupName}**.`
+                });
+            }
+        } catch (e) {
+            logger.error(`Failed to send ranking log: ${e.message}`);
+        }
 
         res.json(response);
     } catch (error) {
@@ -173,7 +206,7 @@ app.post("/clear-cache", adminKeyAuth, async (_, res) => {
 const SendStartupLog = async () => {
     try {
         await axios.post(process.env.STATUS_WEBHOOK, {
-            content: "**[STARTED]**\nThe API is now active."
+            content: "**[STARTED]** The API is now active."
         });
     } catch (error) {
         logger.error(`Error sending startup log to webhook: ${error.message}`);
