@@ -44,7 +44,7 @@ async function updateRank(groupId, membershipId, userId, roleId) {
     };
 
     const response = await apiClient.patch(url, body);
-    
+
     return response.data;
 };
 
