@@ -9,7 +9,6 @@ function getMembership(userId) {
 
 function saveMembership(userId, membershipId) {
     membershipsCache.set(userId, membershipId);
-
     return membershipId;
 };
 
@@ -17,10 +16,9 @@ function getRoleByRank(rank) {
     return rolesCache.get(rank);
 };
 
-function saveRoleByRank(rank, roleId) {
-    rolesCache.set(rank, roleId);
-
-    return roleId;
+function saveRoleByRank(rank, role) {
+    rolesCache.set(rank, role);
+    return role;
 };
 
 function clearAllCaches() {
