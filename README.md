@@ -1,6 +1,6 @@
 # 🔧 Roblox Ranking API
 
-A Node.js Express API to manage Roblox group ranks via Roblox Cloud APIs. Includes in-memory caching, access/admin key auth, logging, and rate limiting.
+A Node.js Express API to manage Roblox group ranks via Roblox Cloud APIs. Includes in-memory caching, access/admin key auth, webhook logging, and more.
 
 Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 
@@ -13,7 +13,9 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 - ⚡ In-memory caching of memberships & roles
 - 📈 Winston logging and webhook notifications
 - 🛡️ Rate limiting to protect from abuse
-- 🔁 Webhook Proxying from Roblox requests (to e.g. Discord)
+- 🔁 Webhook Proxying from Roblox requests (e.g. to Discord)
+- 🧠 Metrics endpoint for uptime, request count, and cache stats
+- 🗒️ Webhook logs for successful rank updates (username, role name, group name)
 
 ---
 
@@ -42,10 +44,11 @@ ACCESS_API_KEY=your-client-access-key
 ADMIN_API_KEY=your-admin-key
 API_KEY=your-roblox-cloud-api-key
 STATUS_WEBHOOK=https://your.status.webhook.url
+RANKING_WEBHOOK=https://your.discord.webhook.for.ranking
 
 # Discord Webhook Proxies (used with /proxy-webhook/:system)
-DISCORD_WEBHOOK_LOGS=https://discord.com/api/webhooks/xxx/yyy
-DISCORD_WEBHOOK_RANKUP=https://discord.com/api/webhooks/aaa/bbb
+PROXY_WEBHOOK_LOGS=https://discord.com/api/webhooks/xxx/yyy
+PROXY_WEBHOOK_RANKUP=https://discord.com/api/webhooks/aaa/bbb
 ```
 
 4. Start the server:
@@ -63,7 +66,7 @@ Returns a simple confirmation message.
 ---
 
 ### `PATCH /update-rank/:groupId`
-Updates a user's rank in a specified group.
+Updates a user's rank in a specified group and logs to a webhook (if configured).
 
 **Headers:**
 - `x-access-key`: Your access key
@@ -76,26 +79,16 @@ Updates a user's rank in a specified group.
 }
 ```
 
+**Webhook Log Format:**
+```
+✅ Ranked **Username** to **Rank Name** in **Group Name**.
+```
+
 **Responses:**
 - `200 OK`: Rank updated successfully
 - `403 Forbidden`: Invalid access key
 - `404 Not Found`: Membership or role not found
 - `500 Internal Error`: API or internal error
-
----
-
-### `POST /clear-cache`
-Clears the in-memory cache.
-
-**Headers:**
-- `x-admin-key`: Your admin key
-
-**Response:**
-```json
-{
-  "message": "All caches cleared"
-}
-```
 
 ---
 
@@ -117,10 +110,46 @@ Payload that you want to forward (same format Discord expects):
 }
 ```
 
-**Responses:**
-- `200 OK`: Message relayed successfully
-- `404 Not Found`: Invalid system
-- `500 Internal Error`: Webhook forwarding failed
+---
+
+### `GET /metrics`
+Returns API uptime, total requests, and cache hit/miss stats.
+
+**Headers:**
+- `x-admin-key`: Your admin key
+
+**Response:**
+```json
+{
+  "uptime": "3600 seconds",
+  "totalRequests": 1234,
+  "cache": {
+    "membership": {
+      "hits": 100,
+      "misses": 20
+    },
+    "role": {
+      "hits": 80,
+      "misses": 5
+    }
+  }
+}
+```
+
+---
+
+### `POST /clear-cache`
+Clears the in-memory cache.
+
+**Headers:**
+- `x-admin-key`: Your admin key
+
+**Response:**
+```json
+{
+  "message": "All caches cleared"
+}
+```
 
 ---
 
