@@ -13,6 +13,7 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 - ⚡ In-memory caching of memberships & roles
 - 📈 Winston logging and webhook notifications
 - 🛡️ Rate limiting to protect from abuse
+- 🔁 Webhook Proxying from Roblox requests (to e.g. Discord)
 
 ---
 
@@ -40,7 +41,11 @@ PORT=3000
 ACCESS_API_KEY=your-client-access-key
 ADMIN_API_KEY=your-admin-key
 API_KEY=your-roblox-cloud-api-key
-GUILDED_WEBHOOK=https://your.webhook.url
+STATUS_WEBHOOK=https://your.status.webhook.url
+
+# Discord Webhook Proxies (used with /proxy-webhook/:system)
+DISCORD_WEBHOOK_LOGS=https://discord.com/api/webhooks/xxx/yyy
+DISCORD_WEBHOOK_RANKUP=https://discord.com/api/webhooks/aaa/bbb
 ```
 
 4. Start the server:
@@ -94,6 +99,31 @@ Clears the in-memory cache.
 
 ---
 
+### `POST /proxy-webhook/:system`
+Relays messages from Roblox to preconfigured Discord webhooks based on the `system`.
+
+**Headers:**
+- `x-access-key`: Your access key
+
+**Params:**
+- `:system` — the identifier for the webhook (e.g., `logs`, `rankup`)
+
+**Body:**
+Payload that you want to forward (same format Discord expects):
+```json
+{
+  "content": "A new user was ranked!",
+  "embeds": []
+}
+```
+
+**Responses:**
+- `200 OK`: Message relayed successfully
+- `404 Not Found`: Invalid system
+- `500 Internal Error`: Webhook forwarding failed
+
+---
+
 ## 🧠 Caching Behavior
 
 - Memberships cached for **10 minutes**
@@ -105,11 +135,5 @@ Clears the in-memory cache.
 ## 📌 Notes
 
 - Make sure your API key has permissions to manage ranks for the group.
-- Use a reverse proxy like NGINX or Cloudflare in production for HTTPS and caching.
+- Use a reverse proxy like NGINX or Cloudflare in production for HTTPS.
 - Keep access/admin keys secret.
-
----
-
-## 🛡️ License
-
-Licensed under ISC by Hydra Research Group.
