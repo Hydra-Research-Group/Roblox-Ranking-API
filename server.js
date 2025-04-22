@@ -47,6 +47,7 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const GROUP_ID = process.env.GROUP_ID;
 
 async function sendWithRetry(url, payload, maxAttempts = 5, delayMs = 2000) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -68,15 +69,10 @@ async function sendWithRetry(url, payload, maxAttempts = 5, delayMs = 2000) {
     };
 };
 
-const fetchUsername = async (userId) => {
+async function fetchUsername(userId) {
     const url = `https://users.roblox.com/v1/users/${userId}`;
     const res = await axios.get(url);
-    return res.data.name;
-};
 
-const fetchGroupName = async (groupId) => {
-    const url = `https://groups.roblox.com/v1/groups/${groupId}`;
-    const res = await axios.get(url);
     return res.data.name;
 };
 
@@ -84,12 +80,11 @@ app.get("/", (_, res) => {
     res.send("Roblox Ranking API, created by https://github.com/orgs/Hydra-Research-Group");
 });
 
-app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
-    const { groupId } = req.params;
+app.patch("/update-rank", accessKeyAuth, async (req, res) => {
     const { userId, rank } = req.body;
 
-    if (!groupId || !userId || !rank) {
-        logger.warn(`Invalid request received for groupId: ${groupId}, userId: ${userId}, rank: ${rank}`);
+    if (!userId || !rank) {
+        logger.warn(`Invalid request received: userId: ${userId}, rank: ${rank}`);
 
         return res.status(400).json({
             error: "Invalid request"
@@ -104,7 +99,7 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
         } else {
             metrics.membershipMisses++;
 
-            const membership = await fetchMembership(groupId, userId);
+            const membership = await fetchMembership(GROUP_ID, userId);
 
             if (membership !== undefined) {
                 membershipId = saveMembership(membership.user.split("/")[1], membership.path.split("/")[3]);
@@ -131,7 +126,7 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
         } else {
             metrics.roleMisses++;
 
-            role = await fetchRoleByRank(groupId, rank);
+            role = await fetchRoleByRank(GROUP_ID, rank);
 
             if (role !== undefined) {
                 role = saveRoleByRank(role.rank, role);
@@ -149,21 +144,20 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
             });
         };
 
-        const response = await updateRank(groupId, membershipId, userId, roleId);
+        const response = await updateRank(GROUP_ID, membershipId, userId, roleId);
 
         res.json(response);
 
         try {
             if (process.env.RANKING_WEBHOOK) {
-                const [username, groupName] = await Promise.all([
-                    fetchUsername(userId),
-                    fetchGroupName(groupId)
+                const [username] = await Promise.all([
+                    fetchUsername(userId)
                 ]);
 
-                const roleDisplay = role ? role.displayName : `Rank ${rank}`;
+                const roleDisplay = role ? role.displayName : rank;
 
                 await sendWithRetry(process.env.RANKING_WEBHOOK, {
-                    content: `✅ Ranked **${username}** to **${roleDisplay}** in **${groupName}**.`
+                    content: `**${username}** has been ranked to rank **${roleDisplay}**!`
                 });
             };
         } catch (error) {
