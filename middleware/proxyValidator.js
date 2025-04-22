@@ -5,7 +5,7 @@ function proxyValidator(req, res, next) {
         return res.status(404).json({
             error: "Invalid system"
         });
-    }
+    };
 
     req.webhookUrl = process.env[`PROXY_WEBHOOK_${system}`];
     next();
