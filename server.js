@@ -26,10 +26,25 @@ const limiter = rateLimit({
     max: 40
 });
 
+let totalRequests = 0;
+let apiStartTime = Date.now();
+
+let metrics = {
+    membershipHits: 0,
+    membershipMisses: 0,
+    roleHits: 0,
+    roleMisses: 0
+};
+
 const app = express();
 app.use(express.json());
 app.use(limiter);
 app.disable("x-powered-by");
+
+app.use((_, _, next) => {
+    totalRequests++;
+    next();
+});
 
 const PORT = process.env.PORT || 3000;
 
@@ -51,7 +66,12 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
 
     try {
         let membershipId = getMembership(userId);
-        if (!membershipId) {
+
+        if (membershipId) {
+            metrics.membershipHits++;
+        } else {
+            metrics.membershipMisses++;
+
             const membership = await fetchMembership(groupId, userId);
 
             if (membership !== undefined) {
@@ -70,7 +90,12 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
         };
 
         let roleId = getRoleByRank(rank);
-        if (!roleId) {
+
+        if (roleId) {
+            metrics.roleHits++;
+        } else {
+            metrics.roleMisses++;
+
             const role = await fetchRoleByRank(groupId, rank);
 
             if (role !== undefined) {
@@ -89,6 +114,7 @@ app.patch("/update-rank/:groupId", accessKeyAuth, async (req, res) => {
         };
 
         const response = await updateRank(groupId, membershipId, userId, roleId);
+
         res.json(response);
     } catch (error) {
         logger.error(`Error updating rank for userId: ${userId} - ${error.message}`);
@@ -114,7 +140,26 @@ app.post("/proxy-webhook/:system", accessKeyAuth, proxyValidator, async (req, re
         res.status(500).json({
             error: "Failed to proxy request"
         });
-    }
+    };
+});
+
+app.get("/metrics", adminKeyAuth, (_, res) => {
+    const uptimeSeconds = Math.floor((Date.now() - apiStartTime) / 1000);
+
+    res.json({
+        uptime: `${uptimeSeconds} seconds`,
+        totalRequests,
+        cache: {
+            membership: {
+                hits: metrics.membershipHits,
+                misses: metrics.membershipMisses
+            },
+            role: {
+                hits: metrics.roleHits,
+                misses: metrics.roleMisses
+            }
+        }
+    });
 });
 
 app.post("/clear-cache", adminKeyAuth, async (_, res) => {
