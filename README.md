@@ -39,6 +39,7 @@ touch .env
 
 And add the following keys:
 ```env
+GROUP_ID=your-roblox-group-id
 PORT=3000
 ACCESS_API_KEY=your-client-access-key
 ADMIN_API_KEY=your-admin-key
@@ -65,8 +66,8 @@ Returns a simple confirmation message.
 
 ---
 
-### `PATCH /update-rank/:groupId`
-Updates a user's rank in a specified group and logs to a webhook (if configured).
+### `PATCH /update-rank`
+Updates a user's rank and logs to a webhook (if configured).
 
 **Headers:**
 - `x-access-key`: Your access key
@@ -81,11 +82,12 @@ Updates a user's rank in a specified group and logs to a webhook (if configured)
 
 **Webhook Log Format:**
 ```
-✅ Ranked **Username** to **Rank Name** in **Group Name**.
+**Username** has been ranked up to **Rank Name**!
 ```
 
 **Responses:**
 - `200 OK`: Rank updated successfully
+- `400 Bad Request`: That user already has that rank
 - `403 Forbidden`: Invalid access key
 - `404 Not Found`: Membership or role not found
 - `500 Internal Error`: API or internal error
