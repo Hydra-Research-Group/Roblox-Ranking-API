@@ -13,7 +13,7 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 - ⚡ In-memory caching of memberships & roles
 - 📈 Winston logging and webhook notifications
 - 🛡️ Rate limiting to protect from abuse
-- 🔁 Webhook Proxying from Roblox requests (e.g. to Discord)
+- 🔁 Webhook Proxying from Roblox requests (e.g. to Discord or Guilded)
 - 🧠 Metrics endpoint for uptime, request count, and cache stats
 - 🗒️ Webhook logs for successful rank updates (username, role name, group name)
 
@@ -44,11 +44,11 @@ ACCESS_API_KEY=your-client-access-key
 ADMIN_API_KEY=your-admin-key
 API_KEY=your-roblox-cloud-api-key
 STATUS_WEBHOOK=https://your.status.webhook.url
-RANKING_WEBHOOK=https://your.discord.webhook.for.ranking
+RANKING_WEBHOOK=https://your.auto-ranking.webhook.url
 
-# Discord Webhook Proxies (used with /proxy-webhook/:system)
-PROXY_WEBHOOK_LOGS=https://discord.com/api/webhooks/xxx/yyy
-PROXY_WEBHOOK_RANKUP=https://discord.com/api/webhooks/aaa/bbb
+# Webhook Proxies (used with /proxy-webhook/:system)
+PROXY_WEBHOOK_LOGS=https://example.webhook.url
+PROXY_WEBHOOK_RANKUP=https://example.webhook.url
 ```
 
 4. Start the server:
@@ -93,7 +93,7 @@ Updates a user's rank in a specified group and logs to a webhook (if configured)
 ---
 
 ### `POST /proxy-webhook/:system`
-Relays messages from Roblox to preconfigured Discord webhooks based on the `system`.
+Relays messages from Roblox to preconfigured webhooks based on the `system`.
 
 **Headers:**
 - `x-access-key`: Your access key
@@ -102,7 +102,7 @@ Relays messages from Roblox to preconfigured Discord webhooks based on the `syst
 - `:system` — the identifier for the webhook (e.g., `logs`, `rankup`)
 
 **Body:**
-Payload that you want to forward (same format Discord expects):
+Payload that you want to forward (same format e.g. Discord or Guilded expects):
 ```json
 {
   "content": "A new user was ranked!",
