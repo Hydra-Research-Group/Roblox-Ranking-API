@@ -110,6 +110,7 @@ app.post("/proxy-webhook/:system", accessKeyAuth, proxyValidator, async (req, re
         });
     } catch (error) {
         logger.error(`Error proxying request: ${error.message}`);
+
         res.status(500).json({
             error: "Failed to proxy request"
         });
@@ -126,7 +127,7 @@ app.post("/clear-cache", adminKeyAuth, async (_, res) => {
 
 const SendStartupLog = async () => {
     try {
-        await axios.post(process.env.GUILDED_WEBHOOK, {
+        await axios.post(process.env.STATUS_WEBHOOK, {
             content: "**[STARTED]**\nThe API is now active."
         });
     } catch (error) {
