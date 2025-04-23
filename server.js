@@ -78,8 +78,9 @@ async function fetchUsername(userId) {
 
 app.get("/", (_, res) => {
     res.json({
-        status: "OK",
-        developer: "HydraXploit"
+        type: "Custom Roblox Ranking API",
+        developer: "HydraXploit",
+        status: "OK"
     });
 });
 
