@@ -82,7 +82,7 @@ Updates a user's rank and logs to a webhook (if configured).
 
 **Webhook Log Format:**
 ```
-**Username** has been ranked up to **Rank Name**!
+The rank of **Username** has been changed to **Rank Name**
 ```
 
 **Responses:**
