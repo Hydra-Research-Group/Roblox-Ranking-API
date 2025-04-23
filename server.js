@@ -49,7 +49,7 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 3000;
 const GROUP_ID = process.env.GROUP_ID;
 
-async function sendWithRetry(url, payload, maxAttempts = 5, delayMs = 2000) {
+async function sendWithRetry(url, payload, maxAttempts = 10, delayMs = 2500) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
             await axios.post(url, payload);
@@ -63,7 +63,7 @@ async function sendWithRetry(url, payload, maxAttempts = 5, delayMs = 2000) {
             if (attempt < maxAttempts) {
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             } else {
-                logger.error("All attempts to send ranking log failed.");
+                logger.error(`All attempts to send ranking log failed. Log content: ${payload.content}`);
             };
         };
     };
@@ -77,7 +77,10 @@ async function fetchUsername(userId) {
 };
 
 app.get("/", (_, res) => {
-    res.send("Roblox Ranking API, created by https://github.com/orgs/Hydra-Research-Group");
+    res.json({
+        status: "OK",
+        developer: "HydraXploit"
+    });
 });
 
 app.patch("/update-rank", accessKeyAuth, async (req, res) => {
@@ -101,7 +104,7 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
 
             const membership = await fetchMembership(GROUP_ID, userId);
 
-            if (membership !== undefined) {
+            if (membership) {
                 membershipId = saveMembership(membership.user.split("/")[1], membership.path.split("/")[3]);
             } else {
                 logger.error(`Failed to fetch membership for userId: ${userId}`);
@@ -128,7 +131,7 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
 
             role = await fetchRoleByRank(GROUP_ID, rank);
 
-            if (role !== undefined) {
+            if (role) {
                 role = saveRoleByRank(role.rank, role);
                 roleId = role.id;
             } else {
@@ -157,7 +160,7 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
                 const roleDisplay = role ? role.displayName : rank;
 
                 await sendWithRetry(process.env.RANKING_WEBHOOK, {
-                    content: `**${username}** has been ranked to rank **${roleDisplay}**!`
+                    content: `The rank of **${username}** has been changed to **${roleDisplay}**`
                 });
             };
         } catch (error) {
