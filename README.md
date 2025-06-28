@@ -1,6 +1,6 @@
 # 🔧 Roblox Ranking API
 
-A Node.js Express API to manage Roblox group ranks via Roblox Cloud APIs. Includes in-memory caching, access/admin key auth, webhook logging, and more.
+A Node.js Express API to manage Roblox group ranks via Roblox Cloud APIs. Includes in-memory caching, access/admin key auth, webhook logging, input validation, and more.
 
 Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 
@@ -10,12 +10,13 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 
 - ✅ Update group ranks via official Roblox Cloud API
 - 🔐 Key-based Access & Admin authentication
+- 🧰 Input validation with Joi
 - ⚡ In-memory caching of memberships & roles
-- 📈 Winston logging and webhook notifications
-- 🛡️ Rate limiting to protect from abuse
-- 🔁 Webhook Proxying from Roblox requests (e.g. to Discord or Guilded)
 - 🧠 Metrics endpoint for uptime, request count, and cache stats
-- 🗒️ Webhook logs for successful rank updates (username, role name, group name)
+- 📈 Winston logging and webhook notifications
+- 🔁 Webhook Proxying from Roblox requests (e.g. to Discord or Guilded)
+- 🛡️ Secure HTTP headers via `helmet`
+- 🗒️ Webhook logs for successful rank updates (includes username & role)
 
 ---
 
@@ -62,12 +63,12 @@ npm start
 ## 📡 API Endpoints
 
 ### `GET /`
-Returns a simple confirmation message.
+Returns a simple confirmation message to verify that the API is running.
 
 ---
 
 ### `PATCH /update-rank`
-Updates a user's rank and logs to a webhook (if configured).
+Updates a user's rank and logs the result to a webhook (if configured).
 
 **Headers:**
 - `x-access-key`: Your access key
@@ -75,10 +76,13 @@ Updates a user's rank and logs to a webhook (if configured).
 **Body:**
 ```json
 {
-  "userId": "12345678",
+  "userId": 12345678,
   "rank": 50
 }
 ```
+
+- `userId`: Must be a positive integer
+- `rank`: Must be an integer from 1 to 254
 
 **Webhook Log Format:**
 ```
@@ -87,7 +91,7 @@ The rank of **Username** has been changed to **Rank Name**
 
 **Responses:**
 - `200 OK`: Rank updated successfully
-- `400 Bad Request`: That user already has that rank
+- `400 Bad Request`: Invalid input (e.g. missing or malformed `userId` or `rank`)
 - `403 Forbidden`: Invalid access key
 - `404 Not Found`: Membership or role not found
 - `500 Internal Error`: API or internal error
@@ -95,16 +99,16 @@ The rank of **Username** has been changed to **Rank Name**
 ---
 
 ### `POST /proxy-webhook/:system`
-Relays messages from Roblox to preconfigured webhooks based on the `system`.
+Relays messages to a preconfigured webhook based on the `system` path parameter.
 
 **Headers:**
 - `x-access-key`: Your access key
 
 **Params:**
-- `:system` — the identifier for the webhook (e.g., `logs`, `rankup`)
+- `:system` — Identifier for the webhook (e.g., `logs`, `rankup`)
 
 **Body:**
-Payload that you want to forward (same format e.g. Discord or Guilded expects):
+Payload you want to forward:
 ```json
 {
   "content": "A new user was ranked!",
@@ -112,10 +116,16 @@ Payload that you want to forward (same format e.g. Discord or Guilded expects):
 }
 ```
 
+**Response:**
+- `200 OK`: Webhook message sent
+- `403 Forbidden`: Invalid access key
+- `404 Not Found`: Invalid system
+- `500 Internal Error`: Failed to send message
+
 ---
 
 ### `GET /metrics`
-Returns API uptime, total requests, and cache hit/miss stats.
+Returns API uptime, request count, and in-memory cache stats.
 
 **Headers:**
 - `x-admin-key`: Your admin key
@@ -141,7 +151,7 @@ Returns API uptime, total requests, and cache hit/miss stats.
 ---
 
 ### `POST /clear-cache`
-Clears the in-memory cache.
+Clears both membership and role caches.
 
 **Headers:**
 - `x-admin-key`: Your admin key
@@ -157,14 +167,17 @@ Clears the in-memory cache.
 
 ## 🧠 Caching Behavior
 
-- Memberships cached for **10 minutes**
-- Roles cached for **30 minutes**
-- Use `/clear-cache` to manually reset
+- Memberships are cached for **10 minutes**
+- Roles are cached for **30 minutes**
+- Use `/clear-cache` to manually reset cache
 
 ---
 
-## 📌 Notes
+## 🔒 Notes
 
-- Make sure your API key has permissions to manage ranks for the group.
-- Use a reverse proxy like NGINX or Cloudflare in production for HTTPS.
-- Keep access/admin keys secret.
+- Input to `/update-rank` is validated using `Joi`
+- The `helmet` middleware is used to enhance HTTP header security
+- The username is fetched and included in webhook messages on successful rank updates
+- Ensure your Roblox API key has permission to manage ranks for the group
+- Consider using a reverse proxy (like NGINX or Cloudflare) for HTTPS and additional security
+- Keep your `ACCESS_API_KEY` and `ADMIN_API_KEY` private
