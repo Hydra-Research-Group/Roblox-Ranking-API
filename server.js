@@ -1,6 +1,8 @@
 const express = require("express");
 const axios = require("axios");
 const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
+const Joi = require("joi");
 const {
     fetchMembership,
     fetchRoleByRank,
@@ -38,6 +40,7 @@ let metrics = {
 
 const app = express();
 app.use(express.json());
+app.use(helmet());
 app.use(limiter);
 app.disable("x-powered-by");
 
@@ -85,15 +88,24 @@ app.get("/", (_, res) => {
 });
 
 app.patch("/update-rank", accessKeyAuth, async (req, res) => {
-    const { userId, rank } = req.body;
+    const schema = Joi.object({
+        userId: Joi.number().integer().positive().required(),
+        rank: Joi.number().integer().min(1).max(254).required()
+    });
 
-    if (!userId || !rank) {
-        logger.warn(`Invalid request received: userId: ${userId}, rank: ${rank}`);
+    const {
+        error,
+        value
+    } = schema.validate(req.body);
 
+    if (error) {
+        logger.warn(`Validation failed: ${error.details[0].message}`);
         return res.status(400).json({
-            error: "Invalid request"
+            error: error.details[0].message
         });
     };
+
+    const { userId, rank } = value;
 
     try {
         let membershipId = getMembership(userId);
