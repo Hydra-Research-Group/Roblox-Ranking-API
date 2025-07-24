@@ -234,10 +234,22 @@ app.post("/clear-cache", adminKeyAuth, async (_, res) => {
 });
 
 const SendStartupLog = async () => {
+    let payload = {
+        embeds: [
+            {
+                title: "API started",
+                description: "The API has been restarted.",
+                color: 0x0000FF
+            }
+        ]
+    };
+
+    if (process.env.DEVELOPER_PING) {
+        payload.content = process.env.DEVELOPER_PING
+    };
+
     try {
-        await axios.post(process.env.STATUS_WEBHOOK, {
-            content: "**[STARTED]** The API is now active."
-        });
+        await axios.post(process.env.STATUS_WEBHOOK, payload);
     } catch (error) {
         logger.error(`Error sending startup log to webhook: ${error.message}`);
     };
