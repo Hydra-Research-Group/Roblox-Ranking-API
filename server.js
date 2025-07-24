@@ -237,9 +237,13 @@ const SendStartupLog = async () => {
     let payload = {
         embeds: [
             {
-                title: "API started",
-                description: "The API has been restarted.",
-                color: 0x0000FF
+                title: "「 API STATUS 」",
+                description: "The API has been successfully restarted.",
+                color: 5763719,
+                footer: {
+                    text: "© Hydra Research & Development"
+                },
+                timestamp: new Date().toISOString()
             }
         ]
     };
