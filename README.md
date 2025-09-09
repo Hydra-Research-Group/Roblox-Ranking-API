@@ -1,59 +1,80 @@
 # 🔧 Roblox Ranking API
 
-A Node.js Express API to manage Roblox group ranks via Roblox Cloud APIs. Includes in-memory caching, access/admin key auth, webhook logging, input validation, and more.
+A small, sturdy Node.js API for managing Roblox group ranks via the official Roblox Cloud APIs, with caching, key-based auth, webhook logging, metrics, and a few quality-of-life tools.
 
 Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 
 ---
 
-## 🚀 Features
+## ✨ What you get
 
-- ✅ Update group ranks via official Roblox Cloud API
-- 🔐 Key-based Access & Admin authentication
-- 🧰 Input validation with Joi
-- ⚡ In-memory caching of memberships & roles
-- 🧠 Metrics endpoint for uptime, request count, and cache stats
-- 📈 Winston logging and webhook notifications
-- 🔁 Webhook Proxying from Roblox requests (e.g. to Discord or Guilded)
-- 🛡️ Secure HTTP headers via `helmet`
-- 🗒️ Webhook logs for successful rank updates (includes username & role)
+- ✅ Rank updates via Roblox Cloud API  
+- 🔐 Key-based Access and Admin authentication (headers)  
+- 🧰 Input validation (Joi)  
+- ⚡ In-memory caching (memberships & roles)  
+- 🧠 Metrics endpoint (uptime, request count, cache stats)  
+- 📈 Logging (winston, timestamped via moment)  
+- 🔁 Webhook proxying (e.g. forward Discord/Guilded payloads)  
+- 🛡️ Security headers with helmet + `x-powered-by` disabled  
+- 🚦 Rate limiting: 40 requests/min/IP (global)  
 
 ---
 
-## 📁 Setup
+## 🧰 Quickstart
 
-1. Clone the repository:
-```bash
-git clone https://github.com/Hydra-Research-Group/Roblox-Ranking-API.git
-cd Roblox-Ranking-API
-```
+1. **Clone & install**
+   ```bash
+   git clone https://github.com/Hydra-Research-Group/Roblox-Ranking-API.git
+   cd Roblox-Ranking-API
+   npm install
+   ```
 
-2. Install dependencies:
-```bash
-npm install
-```
+2. **Configure** `.env` (rename from `.env.example` and fill in values)
 
-3. Configure the `.env` file.<br>Rename the [.env.example](./.env.example) file, and fill out the details that it needs
+3. **Run**
+   ```bash
+   npm start
+   ```
 
-4. Start the server:
-```bash
-npm start
-```
+---
+
+## ⚙️ Environment variables
+
+| Variable               | Required | Description                                                                                                                  |
+| ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `GROUP_ID`             | Yes      | Your Roblox group ID.                                                                                                        |
+| `API_KEY`              | Yes      | Roblox API key with `groups` access and `group:write` permission. [Docs](https://create.roblox.com/docs/cloud/auth/api-keys) |
+| `PORT`                 | No       | Port for the API to run on (default: 3080).                                                                                  |
+| `ACCESS_API_KEY`       | Yes      | Header key (`x-access-key`) for `/update-rank` and `/proxy-webhook/:system`.                                                 |
+| `ADMIN_API_KEY`        | Yes      | Header key (`x-admin-key`) for `/metrics` and `/clear-cache`.                                                                |
+| `DEVELOPER_PING`       | No       | Discord mention (e.g. `<@!12345>`) when API restarts.                                                                        |
+| `STATUS_WEBHOOK`       | No       | Webhook notified when API restarts.                                                                                          |
+| `RANKING_WEBHOOK`      | No       | Webhook for logging successful rank updates.                                                                                 |
+| `PROXY_WEBHOOK_<NAME>` | No       | One or more system webhooks (e.g. `PROXY_WEBHOOK_BAN`) for `/proxy-webhook/:system`.                                         |
 
 ---
 
 ## 📡 API Endpoints
 
 ### `GET /`
-Returns a simple confirmation message to verify that the API is running.
+
+**Purpose:** Health check, confirms API is alive.  
+**Response:**
+```json
+{
+  "type": "Custom Roblox Ranking API",
+  "developer": "HydraXploit",
+  "status": "OK"
+}
+```
 
 ---
 
 ### `PATCH /update-rank`
-Updates a user's rank and logs the result to a webhook (if configured).
 
-**Headers:**
-- `x-access-key`: Your access key
+**Purpose:** Update a user's group rank.  
+**Headers:**  
+- `x-access-key`: Access API key  
 
 **Body:**
 ```json
@@ -63,34 +84,33 @@ Updates a user's rank and logs the result to a webhook (if configured).
 }
 ```
 
-- `userId`: Must be a positive integer
-- `rank`: Must be an integer from 1 to 254
+- `userId`: positive integer  
+- `rank`: integer 1–254  
 
-**Webhook Log Format:**
+**Success webhook (if configured):**
 ```
-The rank of **Username** has been changed to **Rank Name**
+The rank of **Username** has been changed to **Role Name**
 ```
 
-**Responses:**
-- `200 OK`: Rank updated successfully
-- `400 Bad Request`: Invalid input (e.g. missing or malformed `userId` or `rank`)
-- `403 Forbidden`: Invalid access key
-- `404 Not Found`: Membership or role not found
-- `500 Internal Error`: API or internal error
+**Responses:**  
+- `200 OK` → Rank updated  
+- `400 Bad Request` → Invalid body, or the user is already in the specified rank  
+- `403 Forbidden` → Bad access key  
+- `404 Not Found` → Membership/role not found  
+- `500 Internal Error` → Roblox API/internal error  
 
 ---
 
 ### `POST /proxy-webhook/:system`
-Relays messages to a preconfigured webhook based on the `system` path parameter.
 
-**Headers:**
-- `x-access-key`: Your access key
+**Purpose:** Relay payloads to a preconfigured webhook.  
+**Headers:**  
+- `x-access-key`: Access API key  
 
-**Params:**
-- `:system` — Identifier for the webhook (e.g., `logs`, `rankup`)
+**Params:**  
+- `:system` → must match an env var (`PROXY_WEBHOOK_<NAME>`)  
 
-**Body:**
-Payload you want to forward:
+**Body (example):**
 ```json
 {
   "content": "A new user was ranked!",
@@ -98,19 +118,19 @@ Payload you want to forward:
 }
 ```
 
-**Response:**
-- `200 OK`: Webhook message sent
-- `403 Forbidden`: Invalid access key
-- `404 Not Found`: Invalid system
-- `500 Internal Error`: Failed to send message
+**Responses:**  
+- `200 OK` → Message sent  
+- `403 Forbidden` → Bad access key  
+- `404 Not Found` → Invalid system  
+- `500 Internal Error` → Failed to send  
 
 ---
 
 ### `GET /metrics`
-Returns API uptime, request count, and in-memory cache stats.
 
-**Headers:**
-- `x-admin-key`: Your admin key
+**Purpose:** Returns uptime, total requests, and cache stats.  
+**Headers:**  
+- `x-admin-key`: Admin API key  
 
 **Response:**
 ```json
@@ -118,14 +138,8 @@ Returns API uptime, request count, and in-memory cache stats.
   "uptime": "3600 seconds",
   "totalRequests": 1234,
   "cache": {
-    "membership": {
-      "hits": 100,
-      "misses": 20
-    },
-    "role": {
-      "hits": 80,
-      "misses": 5
-    }
+    "membership": { "hits": 100, "misses": 20 },
+    "role": { "hits": 80, "misses": 5 }
   }
 }
 ```
@@ -133,33 +147,37 @@ Returns API uptime, request count, and in-memory cache stats.
 ---
 
 ### `POST /clear-cache`
-Clears both membership and role caches.
 
-**Headers:**
-- `x-admin-key`: Your admin key
+**Purpose:** Manually clears membership & role caches.  
+**Headers:**  
+- `x-admin-key`: Admin API key  
 
 **Response:**
 ```json
-{
-  "message": "All caches cleared"
-}
+{ "message": "All caches cleared" }
 ```
 
 ---
 
-## 🧠 Caching Behavior
+## 🧠 Caching
 
-- Memberships are cached for **10 minutes**
-- Roles are cached for **30 minutes**
-- Use `/clear-cache` to manually reset cache
+- Memberships: 10 minutes  
+- Roles: 30 minutes  
+- Clear manually: `POST /clear-cache`  
 
 ---
 
-## 🔒 Notes
+## 🔒 Security Notes
 
-- Input to `/update-rank` is validated using `Joi`
-- The `helmet` middleware is used to enhance HTTP header security
-- The username is fetched and included in webhook messages on successful rank updates
-- Ensure your Roblox API key has permission to manage ranks for the group
-- Consider using a reverse proxy (like NGINX or Cloudflare) for HTTPS and additional security
-- Keep your `ACCESS_API_KEY` and `ADMIN_API_KEY` private
+- All rank updates are validated (Joi).  
+- Roblox API key must have `group:write` permission.  
+- Uses helmet and disables `x-powered-by`.  
+- Global rate limit: 40 req/min/IP.  
+- Protect your `ACCESS_API_KEY` and `ADMIN_API_KEY`.  
+- Recommended: run behind HTTPS (e.g., NGINX, Cloudflare).  
+
+---
+
+## 📜 License
+
+Licensed under the [Hydra Research Group Permissive License (HRGPL)](LICENSE).
