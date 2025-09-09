@@ -33,25 +33,7 @@ cd Roblox-Ranking-API
 npm install
 ```
 
-3. Create a `.env` file:
-```bash
-touch .env
-```
-
-And add the following keys:
-```env
-GROUP_ID=your-roblox-group-id
-PORT=3000
-ACCESS_API_KEY=your-client-access-key
-ADMIN_API_KEY=your-admin-key
-API_KEY=your-roblox-cloud-api-key
-STATUS_WEBHOOK=https://your.status.webhook.url
-RANKING_WEBHOOK=https://your.auto-ranking.webhook.url
-
-# Webhook Proxies (used with /proxy-webhook/:system)
-PROXY_WEBHOOK_LOGS=https://example.webhook.url
-PROXY_WEBHOOK_RANKUP=https://example.webhook.url
-```
+3. Configure the `.env` file.<br>Rename the [.env.example](./.env.example) file, and fill out the details that it needs
 
 4. Start the server:
 ```bash
