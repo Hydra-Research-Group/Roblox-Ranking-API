@@ -1,5 +1,7 @@
 const axios = require("axios");
-require("dotenv").config();
+require("dotenv").config({
+    quiet: true
+});
 
 const API_KEY = process.env.API_KEY;
 const BASE_URL = "https://apis.roblox.com/cloud/v2/groups";
@@ -20,18 +22,18 @@ async function fetchMembership(groupId, userId) {
 
 async function fetchRoleByRank(groupId, rank) {
     let url = `${BASE_URL}/${groupId}/roles?maxPageSize=100`;
-    let nextPageToken;
+    let nextPageToken = undefined;
 
-    do {
-        const response = await apiClient.get(nextPageToken ? `${url}&pageToken=${nextPageToken}` : url);
+    for (; ;) {
+        const pageUrl = nextPageToken ? `${url}&pageToken=${nextPageToken}` : url;
+        const response = await apiClient.get(pageUrl);
 
         const role = response.data.groupRoles.find(r => r.rank === rank);
-        if (role != null) {
-            return role;
-        };
+        if (role) return role;
 
         nextPageToken = response.data.nextPageToken;
-    } while (nextPageToken !== "");
+        if (!nextPageToken) break;
+    };
 
     throw new Error("Role not found");
 };
