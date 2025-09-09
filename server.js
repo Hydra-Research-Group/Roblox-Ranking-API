@@ -21,7 +21,9 @@ const {
     adminKeyAuth
 } = require("./middleware/keyAuth");
 const { proxyValidator } = require("./middleware/proxyValidator");
-require("dotenv").config();
+require("dotenv").config({
+    quiet: true
+});
 
 const limiter = rateLimit({
     windowMs: 1 * 60 * 1000,
@@ -45,11 +47,13 @@ app.use(limiter);
 app.disable("x-powered-by");
 
 app.use((req, res, next) => {
+    logger.info(`${req.method} ${req.originalUrl}`);
+
     totalRequests++;
     next();
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3080;
 const GROUP_ID = process.env.GROUP_ID;
 
 async function sendWithRetry(url, payload, maxAttempts = 10, delayMs = 2500) {
@@ -183,7 +187,7 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
         logger.error(`Error updating rank for userId: ${userId} - ${error.message}`);
 
         res.status(500).json({
-            error: error.message
+            error: "Internal server error"
         });
     };
 });
@@ -234,6 +238,8 @@ app.post("/clear-cache", adminKeyAuth, async (_, res) => {
 });
 
 const SendStartupLog = async () => {
+    if (!process.env.STATUS_WEBHOOK) return;
+
     let payload = {
         embeds: [
             {
@@ -261,4 +267,14 @@ const SendStartupLog = async () => {
 
 SendStartupLog();
 
-app.listen(PORT, () => logger.info(`API is running on port ${PORT}`));
+const server = app.listen(PORT, () => logger.info(`API is running on port ${PORT}`));
+
+const shutdown = () => {
+    logger.info("Shutting down...");
+    server.close(() => process.exit(0));
+
+    setTimeout(() => process.exit(1), 10000);
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
