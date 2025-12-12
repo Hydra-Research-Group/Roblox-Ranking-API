@@ -11,7 +11,7 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 - ✅ Rank updates via Roblox Cloud API  
 - 🔐 Key-based Access and Admin authentication (headers)  
 - 🧰 Input validation (Joi)  
-- ⚡ In-memory caching (memberships & roles)  
+- ⚡ Best-effort in-memory caching (memberships & roles, TTL-based)  
 - 🧠 Metrics endpoint (uptime, request count, cache stats)  
 - 📈 Logging (winston, timestamped via moment)  
 - 🔁 Webhook proxying (e.g. forward Discord/Guilded payloads)  
@@ -59,11 +59,11 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 ### `GET /`
 
 **Purpose:** Health check, confirms API is alive.  
-**Response:**
+
+**Response (example):**
 ```json
 {
   "type": "Custom Roblox Ranking API",
-  "developer": "HydraXploit",
   "status": "OK"
 }
 ```
@@ -73,10 +73,11 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 ### `PATCH /update-rank`
 
 **Purpose:** Update a user's group rank.  
+
 **Headers:**  
 - `x-access-key`: Access API key  
 
-**Body:**
+**Body (example):**
 ```json
 {
   "userId": 12345678,
@@ -87,14 +88,26 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 - `userId`: positive integer  
 - `rank`: integer 1–254  
 
-**Success webhook (if configured):**
+**Success webhook (if configured) (example):**
 ```
 The rank of **Username** has been changed to **Role Name**
 ```
 
+**Response (example) (`200 OK`):**
+```json
+{
+  "success": true,
+  "userId": 12345678,
+  "groupId": 987654,
+  "rank": 50,
+  "roleId": "1234567890",
+  "roleName": "Moderator"
+}
+```
+
 **Responses:**  
-- `200 OK` → Rank updated  
-- `400 Bad Request` → Invalid body, or the user is already in the specified rank  
+- `200 OK` → Rank updated successfully  
+- `400 Bad Request` → Invalid request body  
 - `403 Forbidden` → Bad access key  
 - `404 Not Found` → Membership/role not found  
 - `500 Internal Error` → Roblox API/internal error  
@@ -104,6 +117,7 @@ The rank of **Username** has been changed to **Role Name**
 ### `POST /proxy-webhook/:system`
 
 **Purpose:** Relay payloads to a preconfigured webhook.  
+
 **Headers:**  
 - `x-access-key`: Access API key  
 
@@ -129,17 +143,20 @@ The rank of **Username** has been changed to **Role Name**
 ### `GET /metrics`
 
 **Purpose:** Returns uptime, total requests, and cache stats.  
+
 **Headers:**  
 - `x-admin-key`: Admin API key  
 
-**Response:**
+**Response (example):**
 ```json
 {
-  "uptime": "3600 seconds",
+  "uptime": "3600s",
   "totalRequests": 1234,
   "cache": {
-    "membership": { "hits": 100, "misses": 20 },
-    "role": { "hits": 80, "misses": 5 }
+    "membershipHits": 100,
+    "membershipMisses": 20,
+    "roleHits": 80,
+    "roleMisses": 5
   }
 }
 ```
@@ -149,10 +166,11 @@ The rank of **Username** has been changed to **Role Name**
 ### `POST /clear-cache`
 
 **Purpose:** Manually clears membership & role caches.  
+
 **Headers:**  
 - `x-admin-key`: Admin API key  
 
-**Response:**
+**Response (example):**
 ```json
 { "message": "All caches cleared" }
 ```
@@ -173,6 +191,7 @@ The rank of **Username** has been changed to **Role Name**
 - Roblox API key must have `group:write` permission.  
 - Uses helmet and disables `x-powered-by`.  
 - Global rate limit: 40 req/min/IP.  
+- API keys are compared using constant-time checks to mitigate timing attacks.  
 - Protect your `ACCESS_API_KEY` and `ADMIN_API_KEY`.  
 - Recommended: run behind HTTPS (e.g., NGINX, Cloudflare).  
 

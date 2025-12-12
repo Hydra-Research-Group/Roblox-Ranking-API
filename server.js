@@ -21,14 +21,20 @@ const {
     adminKeyAuth
 } = require("./middleware/keyAuth");
 const { proxyValidator } = require("./middleware/proxyValidator");
-require("dotenv").config({
-    quiet: true
-});
+
+require("dotenv").config({ quiet: true });
+
+const app = express();
 
 const limiter = rateLimit({
-    windowMs: 1 * 60 * 1000,
+    windowMs: 60 * 1000,
     max: 40
 });
+
+app.use(express.json());
+app.use(helmet());
+app.use(limiter);
+app.disable("x-powered-by");
 
 let totalRequests = 0;
 let apiStartTime = Date.now();
@@ -40,53 +46,53 @@ let metrics = {
     roleMisses: 0
 };
 
-const app = express();
-app.use(express.json());
-app.use(helmet());
-app.use(limiter);
-app.disable("x-powered-by");
-
 app.use((req, res, next) => {
-    logger.info(`${req.method} ${req.originalUrl}`);
-
     totalRequests++;
+    logger.info(`${req.method} ${req.originalUrl}`);
     next();
 });
 
 const PORT = process.env.PORT || 3080;
 const GROUP_ID = process.env.GROUP_ID;
 
+/* -------------------- Helpers -------------------- */
+
 async function sendWithRetry(url, payload, maxAttempts = 10, delayMs = 2500) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-            await axios.post(url, payload);
-
-            logger.info(`Ranking log sent successfully on attempt ${attempt}`);
-
+            await axios.post(url, payload, { timeout: 5000 });
+            logger.info(`Ranking log sent on attempt ${attempt}`);
             return;
-        } catch (error) {
-            logger.warn(`Attempt ${attempt} failed to send ranking log: ${error.message}`);
-
+        } catch (err) {
+            logger.warn(`Attempt ${attempt} failed: ${err.message}`);
             if (attempt < maxAttempts) {
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-            } else {
-                logger.error(`All attempts to send ranking log failed. Log content: ${payload.content}`);
-            };
-        };
-    };
-};
+                const jitter = Math.floor(Math.random() * 500);
+                await new Promise(r => setTimeout(r, delayMs + jitter));
+            }
+        }
+    }
+
+    logger.error(`All attempts failed to send ranking log`);
+}
 
 async function fetchUsername(userId) {
-    const url = `https://users.roblox.com/v1/users/${userId}`;
-    const res = await axios.get(url);
+    try {
+        const res = await axios.get(
+            `https://users.roblox.com/v1/users/${userId}`,
+            { timeout: 5000 }
+        );
+        return res.data.name;
+    } catch (err) {
+        logger.warn(`Failed to fetch username for ${userId}`);
+        return `UserId ${userId}`;
+    }
+}
 
-    return res.data.name;
-};
+/* -------------------- Routes -------------------- */
 
 app.get("/", (_, res) => {
     res.json({
         type: "Custom Roblox Ranking API",
-        developer: "HydraXploit",
         status: "OK"
     });
 });
@@ -97,182 +103,106 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
         rank: Joi.number().integer().min(1).max(254).required()
     });
 
-    const {
-        error,
-        value
-    } = schema.validate(req.body);
-
+    const { error, value } = schema.validate(req.body);
     if (error) {
-        logger.warn(`Validation failed: ${error.details[0].message}`);
-        return res.status(400).json({
-            error: error.details[0].message
-        });
-    };
+        return res.status(400).json({ error: error.details[0].message });
+    }
 
     const { userId, rank } = value;
 
     try {
-        let membershipId = getMembership(userId);
+        let membershipId = getMembership(GROUP_ID, userId);
 
         if (membershipId) {
             metrics.membershipHits++;
         } else {
             metrics.membershipMisses++;
-
             const membership = await fetchMembership(GROUP_ID, userId);
 
-            if (membership) {
-                membershipId = saveMembership(membership.user.split("/")[1], membership.path.split("/")[3]);
-            } else {
-                logger.error(`Failed to fetch membership for userId: ${userId}`);
-            };
-        };
+            if (!membership) {
+                return res.status(404).json({ error: "Membership not found" });
+            }
 
-        if (!membershipId) {
-            logger.warn(`Membership not found for userId: ${userId}`);
+            const parsedUserId = membership.user.replace("users/", "");
+            const parsedMembershipId = membership.path.split("/").pop();
 
-            return res.status(404).json({
-                error: "Membership not found"
-            });
-        };
+            membershipId = saveMembership(GROUP_ID, parsedUserId, parsedMembershipId);
+        }
 
-        let role = getRoleByRank(rank);
+        let role = getRoleByRank(GROUP_ID, rank);
         let roleId;
 
         if (role) {
             metrics.roleHits++;
-
             roleId = role.id;
         } else {
             metrics.roleMisses++;
-
             role = await fetchRoleByRank(GROUP_ID, rank);
 
-            if (role) {
-                role = saveRoleByRank(role.rank, role);
-                roleId = role.id;
-            } else {
-                logger.error(`Failed to fetch role for rank: ${rank}`);
-            };
-        };
+            if (!role) {
+                return res.status(404).json({ error: "Role not found" });
+            }
 
-        if (!roleId) {
-            logger.warn(`Role not found for rank: ${rank}`);
+            saveRoleByRank(GROUP_ID, rank, role);
+            roleId = role.id;
+        }
 
-            return res.status(404).json({
-                error: "Role not found"
-            });
-        };
+        await updateRank(GROUP_ID, membershipId, userId, roleId);
 
-        const response = await updateRank(GROUP_ID, membershipId, userId, roleId);
-
-        res.json(response);
-
-        try {
-            if (process.env.RANKING_WEBHOOK) {
-                const [username] = await Promise.all([
-                    fetchUsername(userId)
-                ]);
-
-                const roleDisplay = role ? role.displayName : rank;
-
-                await sendWithRetry(process.env.RANKING_WEBHOOK, {
-                    content: `The rank of **${username}** has been changed to **${roleDisplay}**`
-                });
-            };
-        } catch (error) {
-            logger.error(`Unexpected error while preparing ranking log: ${error.message}`);
-        };
-    } catch (error) {
-        logger.error(`Error updating rank for userId: ${userId} - ${error.message}`);
-
-        res.status(500).json({
-            error: "Internal server error"
+        res.json({
+            success: true,
+            userId,
+            groupId: GROUP_ID,
+            roleId,
+            roleName: role.displayName
         });
-    };
+
+        if (process.env.RANKING_WEBHOOK) {
+            const username = await fetchUsername(userId);
+            await sendWithRetry(process.env.RANKING_WEBHOOK, {
+                content: `The rank of **${username}** has been changed to **${role.displayName}**`
+            });
+        }
+    } catch (err) {
+        logger.error(`Rank update failed: ${err.message}`);
+        res.status(500).json({ error: "Internal server error" });
+    }
 });
 
 app.post("/proxy-webhook/:system", accessKeyAuth, proxyValidator, async (req, res) => {
     try {
-        const { webhookUrl } = req;
-
-        await axios.post(webhookUrl, req.body);
-
-        res.json({
-            message: "Message proxied successfully"
-        });
-    } catch (error) {
-        logger.error(`Error proxying request: ${error.message}`);
-
-        res.status(500).json({
-            error: "Failed to proxy request"
-        });
-    };
+        await axios.post(req.webhookUrl, req.body, { timeout: 5000 });
+        res.json({ message: "Message proxied successfully" });
+    } catch (err) {
+        logger.error(`Proxy failed: ${err.message}`);
+        res.status(500).json({ error: "Failed to proxy request" });
+    }
 });
 
 app.get("/metrics", adminKeyAuth, (_, res) => {
     const uptimeSeconds = Math.floor((Date.now() - apiStartTime) / 1000);
 
     res.json({
-        uptime: `${uptimeSeconds} seconds`,
+        uptime: `${uptimeSeconds}s`,
         totalRequests,
-        cache: {
-            membership: {
-                hits: metrics.membershipHits,
-                misses: metrics.membershipMisses
-            },
-            role: {
-                hits: metrics.roleHits,
-                misses: metrics.roleMisses
-            }
-        }
+        cache: metrics
     });
 });
 
-app.post("/clear-cache", adminKeyAuth, async (_, res) => {
+app.post("/clear-cache", adminKeyAuth, (_, res) => {
     clearAllCaches();
-
-    res.json({
-        message: "All caches cleared"
-    });
+    res.json({ message: "All caches cleared" });
 });
 
-const SendStartupLog = async () => {
-    if (!process.env.STATUS_WEBHOOK) return;
+/* -------------------- Startup / Shutdown -------------------- */
 
-    let payload = {
-        embeds: [
-            {
-                title: "「 API STATUS 」",
-                description: "The API has been successfully restarted.",
-                color: 5763719,
-                footer: {
-                    text: "© Hydra Research & Development"
-                },
-                timestamp: new Date().toISOString()
-            }
-        ]
-    };
-
-    if (process.env.DEVELOPER_PING) {
-        payload.content = process.env.DEVELOPER_PING
-    };
-
-    try {
-        await axios.post(process.env.STATUS_WEBHOOK, payload);
-    } catch (error) {
-        logger.error(`Error sending startup log to webhook: ${error.message}`);
-    };
-};
-
-SendStartupLog();
-
-const server = app.listen(PORT, () => logger.info(`API is running on port ${PORT}`));
+const server = app.listen(PORT, () =>
+    logger.info(`API running on port ${PORT}`)
+);
 
 const shutdown = () => {
     logger.info("Shutting down...");
     server.close(() => process.exit(0));
-
     setTimeout(() => process.exit(1), 10000);
 };
 
