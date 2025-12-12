@@ -196,9 +196,38 @@ app.post("/clear-cache", adminKeyAuth, (_, res) => {
 
 /* -------------------- Startup / Shutdown -------------------- */
 
-const server = app.listen(PORT, () =>
-    logger.info(`API running on port ${PORT}`)
-);
+const sendStartupLog = async () => {
+    if (!process.env.STATUS_WEBHOOK) return;
+
+    const payload = {
+        embeds: [
+            {
+                title: "「 API STATUS 」",
+                description: "The API has been successfully restarted.",
+                color: 5763719,
+                footer: {
+                    text: "© Hydra Research & Development"
+                },
+                timestamp: new Date().toISOString()
+            }
+        ]
+    };
+
+    if (process.env.DEVELOPER_PING) {
+        payload.content = process.env.DEVELOPER_PING;
+    }
+
+    try {
+        await axios.post(process.env.STATUS_WEBHOOK, payload, { timeout: 5000 });
+    } catch (error) {
+        logger.error(`Error sending startup log: ${error.message}`);
+    }
+};
+
+const server = app.listen(PORT, async () => {
+    logger.info(`API running on port ${PORT}`);
+    await sendStartupLog();
+});
 
 const shutdown = () => {
     logger.info("Shutting down...");
