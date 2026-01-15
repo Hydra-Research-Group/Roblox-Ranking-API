@@ -4,6 +4,7 @@
   "description": "An API to rank people in your group!",
   "main": "server.js",
   "scripts": {
+    "update": "npm i axios@latest dotenv@latest express@latest express-rate-limit@latest helmet@latest helmet@latest joi@latest moment@latest node-cache@latest winston@latest",
     "start": "node ."
   },
   "keywords": [
