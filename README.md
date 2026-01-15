@@ -63,7 +63,7 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 **Response (example):**
 ```json
 {
-  "type": "Custom Roblox Ranking API",
+  "type": "Custom Roblox Ranking and Webhook Proxy API",
   "status": "OK"
 }
 ```

@@ -92,7 +92,7 @@ async function fetchUsername(userId) {
 
 app.get("/", (_, res) => {
     res.json({
-        type: "Custom Roblox Ranking API",
+        type: "Custom Roblox Ranking and Webhook Proxy API",
         status: "OK"
     });
 });
