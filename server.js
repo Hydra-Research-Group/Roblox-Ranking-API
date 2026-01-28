@@ -174,8 +174,32 @@ app.post("/proxy-webhook/:system", accessKeyAuth, proxyValidator, async (req, re
         await axios.post(req.webhookUrl, req.body, { timeout: 5000 });
         res.json({ message: "Message proxied successfully" });
     } catch (err) {
-        logger.error(`Proxy failed: ${err.message}`);
-        res.status(500).json({ error: "Failed to proxy request" });
+        if (err.response) {
+            const { status, headers, data } = err.response;
+
+            if (status === 429) {
+                const retryAfter = headers["retry-after"] ?? data?.retry_after ?? 5;
+
+                logger.warn(`Discord rate-limited webhook (${req.params.system}), retry after ${retryAfter}s`);
+
+                return res.status(429).json({
+                    error: "Rate limited",
+                    retry_after: Number(retryAfter)
+                });
+            };
+
+            logger.error(`Discord error ${status}: ${JSON.stringify(data)}`);
+
+            return res.status(status).json({
+                error: "Webhook error",
+                status
+            });
+        };
+
+        logger.error(`Proxy network failure: ${err.message}`);
+        res.status(502).json({
+            error: "Proxy network error"
+        });
     }
 });
 
