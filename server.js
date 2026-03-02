@@ -20,7 +20,7 @@ const {
     accessKeyAuth,
     adminKeyAuth
 } = require("./middleware/keyAuth");
-const { proxyValidator } = require("./middleware/proxyValidator");
+const { enqueueLog, workerLoop } = require("./queue");
 
 require("dotenv").config({ quiet: true });
 
@@ -54,39 +54,6 @@ app.use((req, res, next) => {
 
 const PORT = process.env.PORT || 3080;
 const GROUP_ID = process.env.GROUP_ID;
-
-/* -------------------- Helpers -------------------- */
-
-async function sendWithRetry(url, payload, maxAttempts = 10, delayMs = 2500) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            await axios.post(url, payload, { timeout: 5000 });
-            logger.info(`Ranking log sent on attempt ${attempt}`);
-            return;
-        } catch (err) {
-            logger.warn(`Attempt ${attempt} failed: ${err.message}`);
-            if (attempt < maxAttempts) {
-                const jitter = Math.floor(Math.random() * 500);
-                await new Promise(r => setTimeout(r, delayMs + jitter));
-            }
-        }
-    }
-
-    logger.error(`All attempts failed to send ranking log`);
-}
-
-async function fetchUsername(userId) {
-    try {
-        const res = await axios.get(
-            `https://users.roblox.com/v1/users/${userId}`,
-            { timeout: 5000 }
-        );
-        return res.data.name;
-    } catch (err) {
-        logger.warn(`Failed to fetch username for ${userId}`);
-        return `UserId ${userId}`;
-    }
-}
 
 /* -------------------- Routes -------------------- */
 
@@ -156,51 +123,37 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
             roleId,
             roleName: role.displayName
         });
-
-        if (process.env.RANKING_WEBHOOK) {
-            const username = await fetchUsername(userId);
-            await sendWithRetry(process.env.RANKING_WEBHOOK, {
-                content: `The rank of **${username}** has been changed to **${role.displayName}**`
-            });
-        }
     } catch (err) {
         logger.error(`Rank update failed: ${err.message}`);
         res.status(500).json({ error: "Internal server error" });
     }
 });
 
-app.post("/proxy-webhook/:system", accessKeyAuth, proxyValidator, async (req, res) => {
-    try {
-        await axios.post(req.webhookUrl, req.body, { timeout: 5000 });
-        res.json({ message: "Message proxied successfully" });
-    } catch (err) {
-        if (err.response) {
-            const { status, headers, data } = err.response;
+app.post("/queue-log", accessKeyAuth, async (req, res) => {
+    const schema = Joi.object({
+        system: Joi.string().required(),
+        content: Joi.string().optional(),
+        embeds: Joi.array().optional()
+    }).or("content", "embeds");
 
-            if (status === 429) {
-                const retryAfter = headers["retry-after"] ?? data?.retry_after ?? 5;
+    const { error, value } = schema.validate(req.body);
 
-                logger.warn(`Discord rate-limited webhook (${req.params.system}), retry after ${retryAfter}s`);
-
-                return res.status(429).json({
-                    error: "Rate limited",
-                    retry_after: Number(retryAfter)
-                });
-            };
-
-            logger.error(`Discord error ${status}: ${JSON.stringify(data)}`);
-
-            return res.status(status).json({
-                error: "Webhook error",
-                status
-            });
-        };
-
-        logger.error(`Proxy network failure: ${err.message}`);
-        res.status(502).json({
-            error: "Proxy network error"
+    if (error) {
+        return res.status(400).json({
+            error: error.details[0].message
         });
     }
+
+    const { system, content, embeds } = value;
+
+    enqueueLog(system.toLowerCase(), {
+        content,
+        embeds
+    });
+
+    res.json({
+        success: true
+    });
 });
 
 app.get("/metrics", adminKeyAuth, (_, res) => {
@@ -250,6 +203,9 @@ const sendStartupLog = async () => {
 
 const server = app.listen(PORT, async () => {
     logger.info(`API running on port ${PORT}`);
+
+    workerLoop();
+
     await sendStartupLog();
 });
 
