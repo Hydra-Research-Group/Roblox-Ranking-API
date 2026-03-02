@@ -1,19 +1,11 @@
 {
-  "name": "roblox_ranking_api",
-  "version": "1.0.0",
-  "description": "An API to rank people in your group!",
   "main": "server.js",
   "scripts": {
     "update": "npm i axios@latest dotenv@latest express@latest express-rate-limit@latest helmet@latest helmet@latest joi@latest moment@latest node-cache@latest winston@latest",
     "start": "node ."
   },
-  "keywords": [
-    "Roblox"
-  ],
-  "author": "Hydra Research Group",
-  "license": "ISC",
   "dependencies": {
-    "axios": "^1.13.5",
+    "axios": "^1.13.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
