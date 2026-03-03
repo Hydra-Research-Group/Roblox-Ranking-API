@@ -1,4 +1,5 @@
 const axios = require("axios");
+const logger = require("./logger");
 require("dotenv").config({ quiet: true });
 
 const API_KEY = process.env.API_KEY;
@@ -38,13 +39,34 @@ async function fetchRoleByRank(groupId, rank) {
 
 async function updateRank(groupId, membershipId, userId, roleId) {
     const url = `${BASE_URL}/${groupId}/memberships/${membershipId}`;
+
+    logger.info("Updating rank:", {
+        groupId,
+        membershipId,
+        userId,
+        roleId
+    });
+
     const body = {
         user: `users/${userId}`,
         role: `groups/${groupId}/roles/${roleId}`
     };
 
-    const res = await apiClient.patch(url, body);
-    return res.data;
+    try {
+        const res = await apiClient.patch(url, body);
+        return res.data;
+    } catch (err) {
+        if (err.response) {
+            logger.error(`Roblox rank API error:
+Status: ${err.response.status}
+Response: ${err.response.data}
+Payload sent: ${JSON.stringify(req.body)}`);
+        } else {
+            logger.error(`Rank update network error: ${err.message}`);
+        }
+
+        throw err;
+    }
 }
 
 module.exports = {

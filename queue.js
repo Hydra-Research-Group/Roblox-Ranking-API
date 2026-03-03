@@ -35,20 +35,30 @@ async function sendWebhook(url, payload) {
         await axios.post(url, payload, { timeout: 5000 });
         return { success: true };
     } catch (err) {
-        if (err.response?.status === 429) {
-            const retryAfter =
-                Number(err.response.headers["retry-after"]) ||
-                Number(err.response.data?.retry_after) ||
-                5;
+        if (err.response) {
+            const status = err.response.status;
+            const body = err.response.data;
 
-            return {
-                success: false,
-                rateLimit: true,
-                retryAfter
-            };
+            if (status === 429) {
+                const retryAfter =
+                    Number(err.response.headers["retry-after"]) ||
+                    Number(err.response.data?.retry_after) ||
+                    5;
+
+                return {
+                    success: false,
+                    rateLimit: true,
+                    retryAfter
+                };
+            }
+
+            logger.error(`Discord webhook error ${status}
+Discord response: ${JSON.stringify(body)}
+Payload sent: ${JSON.stringify(payload)}`);
+        } else {
+            logger.error(`Discord network error: ${err.message}`);
         }
 
-        logger.error(`Discord webhook error: ${err.message}`);
         return { success: false };
     }
 }
@@ -81,7 +91,15 @@ async function processSystem(system) {
         }
 
         if (Array.isArray(log.embeds)) {
-            embedBuffer.push(...log.embeds);
+            for (const embed of log.embeds) {
+                if (!embed) continue;
+                if (!embed.title && !embed.description) {
+                    logger.warn(`Dropped an embed for system ${system}, as it missed a title and/or description`);
+                    continue;
+                };
+
+                embedBuffer.push(embed);
+            }
         }
 
         processed++;
@@ -141,7 +159,7 @@ async function processSystem(system) {
         queues[system].push(...failedLogs);
     }
 
-    logger.info(`Forwarded ${processed - failedLogs.length} logs to ${system}`);
+    logger.info(`System ${system}: processed=${processed}, failed=${failedLogs.length}, embeds=${embedBuffer.length}, contentLines=${contentBuffer.length}`);
 
     return true;
 }

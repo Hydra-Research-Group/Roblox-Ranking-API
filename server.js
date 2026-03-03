@@ -124,7 +124,14 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
             roleName: role.displayName
         });
     } catch (err) {
-        logger.error(`Rank update failed: ${err.message}`);
+        if (err.response) {
+            logger.error(`Rank update failed (${err.response.status})
+Roblox API response: ${JSON.stringify(err.response.data)}
+Payload sent: ${JSON.stringify(req.body)}`);
+        } else {
+            logger.error(`Rank update network error: ${err.message}`);
+        }
+
         res.status(500).json({ error: "Internal server error" });
     }
 });
@@ -137,7 +144,6 @@ app.post("/queue-log", accessKeyAuth, async (req, res) => {
     }).or("content", "embeds");
 
     const { error, value } = schema.validate(req.body);
-
     if (error) {
         return res.status(400).json({
             error: error.details[0].message
