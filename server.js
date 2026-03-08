@@ -26,6 +26,8 @@ require("dotenv").config({ quiet: true });
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 const limiter = rateLimit({
     windowMs: 60 * 1000,
     max: 40
