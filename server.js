@@ -90,10 +90,9 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
                 return res.status(404).json({ error: "Membership not found" });
             }
 
-            const parsedUserId = membership.user.replace("users/", "");
             const parsedMembershipId = membership.path.split("/").pop();
 
-            membershipId = saveMembership(GROUP_ID, parsedUserId, parsedMembershipId);
+            membershipId = saveMembership(GROUP_ID, userId, parsedMembershipId);
         }
 
         let role = getRoleByRank(GROUP_ID, rank);

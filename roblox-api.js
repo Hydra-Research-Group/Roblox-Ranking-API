@@ -40,12 +40,7 @@ async function fetchRoleByRank(groupId, rank) {
 async function updateRank(groupId, membershipId, userId, roleId) {
     const url = `${BASE_URL}/${groupId}/memberships/${membershipId}`;
 
-    logger.info("Updating rank:", {
-        groupId,
-        membershipId,
-        userId,
-        roleId
-    });
+    logger.info(`Updating rank | groupId=${groupId} membershipId=${membershipId} userId=${userId} roleId=${roleId}`);
 
     const body = {
         user: `users/${userId}`,
@@ -59,8 +54,8 @@ async function updateRank(groupId, membershipId, userId, roleId) {
         if (err.response) {
             logger.error(`Roblox rank API error:
 Status: ${err.response.status}
-Response: ${err.response.data}
-Payload sent: ${JSON.stringify(req.body)}`);
+Response: ${JSON.stringify(err.response.data)}
+Payload sent: ${JSON.stringify(body)}`);
         } else {
             logger.error(`Rank update network error: ${err.message}`);
         }
