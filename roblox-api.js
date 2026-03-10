@@ -51,15 +51,6 @@ async function updateRank(groupId, membershipId, userId, roleId) {
         const res = await apiClient.patch(url, body);
         return res.data;
     } catch (err) {
-        if (err.response) {
-            logger.error(`Roblox rank API error:
-Status: ${err.response.status}
-Response: ${JSON.stringify(err.response.data)}
-Payload sent: ${JSON.stringify(body)}`);
-        } else {
-            logger.error(`Rank update network error: ${err.message}`);
-        }
-
         throw err;
     }
 }

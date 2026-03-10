@@ -126,9 +126,11 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
         });
     } catch (err) {
         if (err.response) {
-            logger.error(`Rank update failed (${err.response.status})
-Roblox API response: ${JSON.stringify(err.response.data)}
-Payload sent: ${JSON.stringify(req.body)}`);
+            logger.error(`Rank update failed\n${JSON.stringify({
+                status: err.response.status,
+                response: err.response.data,
+                payload: req.body
+            }, null, 2)}`);
         } else {
             logger.error(`Rank update network error: ${err.message}`);
         }
