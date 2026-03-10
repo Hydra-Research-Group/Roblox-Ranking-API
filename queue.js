@@ -8,6 +8,7 @@ const MAIN_LOOP_DELAY = 20000;
 const queues = {};
 
 let globalCooldownUntil = 0;
+const MAX_QUEUE = 100;
 
 /**
  * @param {String} system
@@ -22,6 +23,11 @@ function getWebhook(system) {
 function enqueueLog(system, log) {
     if (!queues[system]) {
         queues[system] = [];
+    }
+
+    if (queues[system].length > MAX_QUEUE) {
+        queues[system].shift();
+        logger.warn(`Queue overflow for ${system}, dropping oldest log`);
     }
 
     queues[system].push(log);
@@ -70,7 +76,7 @@ async function processSystem(system) {
     const webhook = getWebhook(system);
     if (!webhook) {
         logger.warn(`No webhook configured for system: ${system}`);
-        queues[system] = undefined;
+        delete queues[system];
         return;
     }
 
@@ -106,26 +112,26 @@ async function processSystem(system) {
     }
 
     if (contentBuffer.length > 0) {
-        const result = await sendWebhook(webhook, {
-            content: contentBuffer.join("\n")
-        });
+        let content = contentBuffer.join("\n");
+
+        if (content.length > 2000) {
+            content = `${content.slice(0, 1990)}...`;
+        }
+
+        const result = await sendWebhook(webhook, { content });
 
         if (result.rateLimit) {
-            globalCooldownUntil = Date.now() + result.retryAfter * 1000;
+            globalCooldownUntil = Date.now() + (result.retryAfter + 5) * 1000;
 
             logger.warn(`Discord global rate limit triggered. Cooling down for ${result.retryAfter}s`);
 
-            queues[system].unshift({
-                content: contentBuffer.join("\n")
-            });
+            queues[system].unshift({ content });
 
             return false;
         }
 
         if (!result.success) {
-            failedLogs.push({
-                content: contentBuffer.join("\n")
-            });
+            failedLogs.push({ content });
         }
     }
 
