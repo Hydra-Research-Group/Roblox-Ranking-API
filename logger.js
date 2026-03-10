@@ -6,6 +6,7 @@ const timestampFormat = () => moment().format("DD/MM/YYYY HH:mm");
 const logger = winston.createLogger({
     level: 'info',
     format: winston.format.combine(
+        winston.format.colorize({ all: true }),
         winston.format.timestamp({ format: timestampFormat }),
         winston.format.printf(({ timestamp, level, message }) => {
             return `${timestamp} [${level}] ${message}`;
