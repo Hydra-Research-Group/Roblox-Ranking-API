@@ -94,7 +94,8 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
 
             const parsedMembershipId = membership.path.split("/").pop();
 
-            membershipId = saveMembership(GROUP_ID, userId, parsedMembershipId);
+            saveMembership(GROUP_ID, userId, parsedMembershipId);
+            membershipId = parsedMembershipId
         }
 
         let role = getRoleByRank(GROUP_ID, rank);
