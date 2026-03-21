@@ -2,10 +2,12 @@ const axios = require("axios");
 const logger = require("./logger");
 
 const EMBED_BATCH_SIZE = 10;
+const WEBHOOK_MESSAGE_DELAY = 2000;
 const SYSTEM_DELAY = 5000;
 const MAIN_LOOP_DELAY = 20000;
 
 const queues = {};
+const invalidSystems = new Set();
 
 let globalCooldownUntil = 0;
 const MAX_QUEUE = 100;
@@ -76,7 +78,10 @@ async function processSystem(system) {
     const webhook = getWebhook(system);
     if (!webhook) {
         logger.warn(`No webhook configured for system: ${system}`);
+
+        invalidSystems.add(system);
         delete queues[system];
+
         return;
     }
 
@@ -112,52 +117,76 @@ async function processSystem(system) {
     }
 
     if (contentBuffer.length > 0) {
-        let content = contentBuffer.join("\n");
+        const lines = contentBuffer;
+        const batches = [];
+        let current = "";
 
-        if (content.length > 2000) {
-            content = `${content.slice(0, 1990)}...`;
+        for (const line of lines) {
+            const next = current ? `${current}\n${line}` : line;
+
+            if (next.length > 2000) {
+                if (current) batches.push(current);
+
+                current = line.length > 2000 ? `${line.slice(0, 1990)}...` : line;
+            } else {
+                current = next;
+            }
         }
 
-        const result = await sendWebhook(webhook, { content });
+        if (current) batches.push(current);
 
-        if (result.rateLimit) {
-            globalCooldownUntil = Date.now() + (result.retryAfter + 5) * 1000;
+        for (let i = 0; i < batches.length; i++) {
+            const batch = batches[i];
+            const result = await sendWebhook(webhook, { content: batch });
 
-            logger.warn(`Discord global rate limit triggered. Cooling down for ${result.retryAfter}s`);
+            if (result.rateLimit) {
+                globalCooldownUntil = Date.now() + (result.retryAfter + 5) * 1000;
+                logger.warn(`Discord global rate limit triggered. Cooling down for ${result.retryAfter}s`);
 
-            queues[system].unshift({ content });
+                const remainingBatches = batches.slice(i);
+                queues[system].unshift(...remainingBatches.map(b => ({ content: b })));
+                return false;
+            }
 
-            return false;
-        }
+            if (!result.success) {
+                failedLogs.push({ content: batch });
+            }
 
-        if (!result.success) {
-            failedLogs.push({ content });
+            if (i < batches.length - 1) {
+                await new Promise(r => setTimeout(r, WEBHOOK_MESSAGE_DELAY));
+            }
         }
     }
 
-    for (let i = 0; i < embedBuffer.length; i += EMBED_BATCH_SIZE) {
-        const batch = embedBuffer.slice(i, i + EMBED_BATCH_SIZE);
+    if (contentBuffer.length > 0 && embedBuffer.length > 0) {
+        await new Promise(r => setTimeout(r, WEBHOOK_MESSAGE_DELAY));
+    }
 
-        const result = await sendWebhook(webhook, {
-            embeds: batch
-        });
+    if (embedBuffer.length > 0) {
+        for (let i = 0; i < embedBuffer.length; i += EMBED_BATCH_SIZE) {
+            const batch = embedBuffer.slice(i, i + EMBED_BATCH_SIZE);
+            const result = await sendWebhook(webhook, { embeds: batch });
 
-        if (result.rateLimit) {
-            globalCooldownUntil = Date.now() + result.retryAfter * 1000;
+            if (result.rateLimit) {
+                globalCooldownUntil = Date.now() + (result.retryAfter + 5) * 1000;
+                logger.warn(`Discord global rate limit triggered. Cooling down for ${result.retryAfter}s`);
 
-            logger.warn(`Discord global rate limit triggered. Cooling down for ${result.retryAfter}s`);
+                queues[system].unshift({
+                    embeds: batch
+                });
 
-            queues[system].unshift({
-                embeds: batch
-            });
+                return false;
+            }
 
-            return false;
-        }
+            if (!result.success) {
+                failedLogs.push({
+                    embeds: batch
+                });
+            }
 
-        if (!result.success) {
-            failedLogs.push({
-                embeds: batch
-            });
+            if (i + EMBED_BATCH_SIZE < embedBuffer.length) {
+                await new Promise(r => setTimeout(r, WEBHOOK_MESSAGE_DELAY));
+            }
         }
     }
 
@@ -172,27 +201,37 @@ async function processSystem(system) {
 
 async function workerLoop() {
     while (true) {
-        const now = Date.now();
+        try {
+            const now = Date.now();
 
-        if (now < globalCooldownUntil) {
-            const wait = globalCooldownUntil - now + 5000;
+            if (now < globalCooldownUntil) {
+                const wait = globalCooldownUntil - now;
 
-            logger.warn(`Global webhook cooldown active (${Math.ceil(wait / 1000)}s)`);
+                logger.warn(`Global webhook cooldown active (${Math.ceil(wait / 1000)}s)`);
 
-            await new Promise(r => setTimeout(r, wait));
-            continue;
+                await new Promise(r => setTimeout(r, wait));
+                continue;
+            }
+
+            const systems = Object.keys(queues);
+
+            for (const system of systems) {
+                if (invalidSystems.has(system)) continue;
+
+                const queue = queues[system];
+                if (!queue || queue.length === 0) continue;
+
+                const result = await processSystem(system);
+                if (result === false) break;
+
+                await new Promise(r => setTimeout(r, SYSTEM_DELAY));
+            }
+
+            await new Promise(r => setTimeout(r, MAIN_LOOP_DELAY));
+        } catch (err) {
+            logger.error(`Unexpected worker error: ${err.message}`);
+            await new Promise(r => setTimeout(r, MAIN_LOOP_DELAY));
         }
-
-        const systems = Object.keys(queues);
-
-        for (const system of systems) {
-            const result = await processSystem(system);
-            if (result === false) break;
-
-            await new Promise(r => setTimeout(r, SYSTEM_DELAY));
-        }
-
-        await new Promise(r => setTimeout(r, MAIN_LOOP_DELAY));
     }
 }
 
