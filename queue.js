@@ -2,9 +2,9 @@ const axios = require("axios");
 const logger = require("./logger");
 
 const EMBED_BATCH_SIZE = 10;
-const WEBHOOK_MESSAGE_DELAY = 2000;
-const SYSTEM_DELAY = 5000;
-const MAIN_LOOP_DELAY = 20000;
+const WEBHOOK_MESSAGE_DELAY = 5000;
+const SYSTEM_DELAY = 8000;
+const MAIN_LOOP_DELAY = 30000;
 
 const queues = {};
 const invalidSystems = new Set();
@@ -235,7 +235,13 @@ async function workerLoop() {
     }
 }
 
+function getCooldownUntil() {
+    return globalCooldownUntil;
+}
+
 module.exports = {
     enqueueLog,
-    workerLoop
+    workerLoop,
+    queues,
+    getCooldownUntil
 };

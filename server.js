@@ -20,7 +20,7 @@ const {
     accessKeyAuth,
     adminKeyAuth
 } = require("./middleware/keyAuth");
-const { enqueueLog, workerLoop } = require("./queue");
+const { enqueueLog, workerLoop, queues, getCooldownUntil } = require("./queue");
 
 require("dotenv").config({ quiet: true });
 
@@ -163,6 +163,30 @@ app.post("/queue-log", accessKeyAuth, async (req, res) => {
 
     res.json({
         success: true
+    });
+});
+
+app.get("/queue-inspect", adminKeyAuth, (_, res) => {
+    const snapshot = {};
+
+    for (const [system, logs] of Object.entries(queues)) {
+        snapshot[system] = {
+            count: logs.length,
+            logs: logs.map(log => ({
+                ...(log.content !== undefined && { content: log.content }),
+                ...(log.embeds !== undefined && { embeds: log.embeds })
+            }))
+        };
+    }
+
+    const cooldownUntil = getCooldownUntil();
+    const now = Date.now();
+
+    res.json({
+        totalSystems: Object.keys(snapshot).length,
+        cooldownActive: now < cooldownUntil,
+        cooldownRemainingMs: (now < cooldownUntil) ? (cooldownUntil - now) : 0,
+        systems: snapshot
     });
 });
 
