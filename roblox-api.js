@@ -21,6 +21,7 @@ async function fetchMembership(groupId, userId) {
 async function fetchRoleByRank(groupId, rank) {
     let nextPageToken;
     const baseUrl = `${BASE_URL}/${groupId}/roles?maxPageSize=100`;
+    const candidates = [];
 
     do {
         const url = nextPageToken
@@ -28,35 +29,53 @@ async function fetchRoleByRank(groupId, rank) {
             : baseUrl;
 
         const res = await apiClient.get(url);
-        const role = res.data.groupRoles.find(r => r.rank === rank);
-        if (role && typeof role.id === "string") return role;
+
+        for (const role of res.data.groupRoles) {
+            if ((role.rank === rank) && (typeof role.id === "string")) {
+                candidates.push(role);
+            }
+        }
 
         nextPageToken = res.data.nextPageToken;
     } while (nextPageToken);
 
-    return null;
+    if (candidates.length === 0) return null;
+
+    candidates.sort((a, b) => Number(a.id) - Number(b.id));
+    if (candidates.length > 1) {
+        logger.warn(`Multiple roles found for rank=${rank} in groupId=${groupId}: [${candidates.map(r => `${r.id}(${r.displayName})`).join(", ")}] - using ${candidates[0].id}(${candidates[0].displayName})`);
+    }
+
+    return candidates[0];
 }
 
-async function updateRank(groupId, membershipId, userId, roleId) {
-    const url = `${BASE_URL}/${groupId}/memberships/${membershipId}`;
-
-    logger.info(`Updating rank | groupId=${groupId} membershipId=${membershipId} userId=${userId} roleId=${roleId}`);
-
+async function assignRole(groupId, membershipId, roleId) {
+    const url = `${BASE_URL}/${groupId}/memberships/${membershipId}:assignRole`;
     const body = {
-        user: `users/${userId}`,
         role: `groups/${groupId}/roles/${roleId}`
     };
 
-    try {
-        const res = await apiClient.patch(url, body);
-        return res.data;
-    } catch (err) {
-        throw err;
-    }
+    logger.info(`Assigning role | groupId=${groupId} membershipId=${membershipId} roleId=${roleId}`);
+
+    const res = await apiClient.post(url, body);
+    return res.data;
+}
+
+async function unassignRole(groupId, membershipId, roleId) {
+    const url = `${BASE_URL}/${groupId}/memberships/${membershipId}:unassignRole`;
+    const body = {
+        role: `groups/${groupId}/roles/${roleId}`
+    };
+
+    logger.info(`Unassigning role | groupId=${groupId} membershipId=${membershipId} roleId=${roleId}`);
+
+    const res = await apiClient.post(url, body);
+    return res.data;
 }
 
 module.exports = {
     fetchMembership,
     fetchRoleByRank,
-    updateRank
+    assignRole,
+    unassignRole
 };

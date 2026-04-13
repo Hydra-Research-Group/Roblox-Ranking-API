@@ -6,7 +6,8 @@ const Joi = require("joi");
 const {
     fetchMembership,
     fetchRoleByRank,
-    updateRank
+    assignRole,
+    unassignRole
 } = require("./roblox-api");
 const {
     getMembership,
@@ -69,75 +70,150 @@ app.get("/", (_, res) => {
 app.patch("/update-rank", accessKeyAuth, async (req, res) => {
     const schema = Joi.object({
         userId: Joi.number().integer().positive().required(),
-        rank: Joi.number().integer().min(1).max(254).required()
-    });
+        addRank: Joi.number().integer().min(1).max(254).optional(),
+        removeRank: Joi.number().integer().min(1).max(254).optional()
+    }).or("addRank", "removeRank");
 
     const { error, value } = schema.validate(req.body);
     if (error) {
         return res.status(400).json({ error: error.details[0].message });
     }
 
-    const { userId, rank } = value;
+    const { userId, addRank, removeRank } = value;
 
-    try {
-        let membershipId = getMembership(GROUP_ID, userId);
+    let membershipId = getMembership(GROUP_ID, userId);
 
-        if (membershipId) {
-            metrics.membershipHits++;
-        } else {
-            metrics.membershipMisses++;
-            const membership = await fetchMembership(GROUP_ID, userId);
+    if (membershipId) {
+        metrics.membershipHits++;
+    } else {
+        metrics.membershipMisses++;
 
-            if (!membership) {
-                return res.status(404).json({ error: "Membership not found" });
-            }
-
-            const parsedMembershipId = membership.path.split("/").pop();
-
-            saveMembership(GROUP_ID, userId, parsedMembershipId);
-            membershipId = parsedMembershipId
+        let membership;
+        try {
+            membership = await fetchMembership(GROUP_ID, userId);
+        } catch (err) {
+            logger.error(`Failed to fetch membership for userId=${userId}: ${err.message}`);
+            return res.status(500).json({ error: "Failed to fetch membership" });
         }
 
-        let role = getRoleByRank(GROUP_ID, rank);
-        let roleId;
+        if (!membership) {
+            return res.status(404).json({ error: "Membership not found" });
+        }
 
-        if (role) {
+        membershipId = membership.path.split("/").pop();
+        saveMembership(GROUP_ID, userId, membershipId);
+    }
+
+    let addRole = null;
+    let removeRole = null;
+
+    if (addRank !== undefined) {
+        addRole = getRoleByRank(GROUP_ID, addRank);
+
+        if (addRole) {
             metrics.roleHits++;
-            roleId = role.id;
         } else {
             metrics.roleMisses++;
-            role = await fetchRoleByRank(GROUP_ID, rank);
-
-            if (!role) {
-                return res.status(404).json({ error: "Role not found" });
+            try {
+                addRole = await fetchRoleByRank(GROUP_ID, addRank);
+            } catch (err) {
+                logger.error(`Failed to fetch role for addRank=${addRank}: ${err.message}`);
             }
 
-            saveRoleByRank(GROUP_ID, rank, role);
-            roleId = role.id;
+            if (addRole) {
+                saveRoleByRank(GROUP_ID, addRank, addRole);
+            }
         }
-
-        await updateRank(GROUP_ID, membershipId, userId, roleId);
-
-        res.json({
-            success: true,
-            userId,
-            groupId: GROUP_ID,
-            roleId,
-            roleName: role.displayName
-        });
-    } catch (err) {
-        if (err.response) {
-            logger.error(`Rank update failed\n${JSON.stringify({
-                status: err.response.status,
-                response: err.response.data,
-                payload: req.body
-            }, null, 2)}`);
-        } else {
-            logger.error(`Rank update network error: ${err.message}`);
-        }
-
-        res.status(500).json({ error: "Internal server error" });
     }
+
+    if (removeRank !== undefined) {
+        removeRole = getRoleByRank(GROUP_ID, removeRank);
+
+        if (removeRole) {
+            metrics.roleHits++;
+        } else {
+            metrics.roleMisses++;
+            try {
+                removeRole = await fetchRoleByRank(GROUP_ID, removeRank);
+            } catch (err) {
+                logger.error(`Failed to fetch role for removeRank=${removeRank}: ${err.message}`);
+            }
+
+            if (removeRole) {
+                saveRoleByRank(GROUP_ID, removeRank, removeRole);
+            }
+        }
+    }
+
+    const result = {};
+
+    if (addRank !== undefined) {
+        if (!addRole) {
+            result.assign = {
+                success: false,
+                error: "Role not found for addRank"
+            };
+        } else {
+            try {
+                await assignRole(GROUP_ID, membershipId, addRole.id);
+                result.assign = {
+                    success: true,
+                    roleId: addRole.id,
+                    roleName: addRole.displayName
+                };
+            } catch (err) {
+                const detail = err.response?.data ?? err.message;
+                logger.error(`assignRole failed | userId=${userId} roleId=${addRole.id}\n${JSON.stringify(detail, null, 2)}`);
+                result.assign = {
+                    success: false,
+                    error: "Roblox API error during assign"
+                };
+            }
+        }
+    }
+
+    if (removeRank !== undefined) {
+        if (!removeRole) {
+            result.unassign = {
+                success: false,
+                error: "Role not found for removeRank"
+            };
+        } else {
+            try {
+                await unassignRole(GROUP_ID, membershipId, removeRole.id);
+                result.unassign = {
+                    success: true,
+                    roleId: removeRole.id,
+                    roleName: removeRole.displayName
+                };
+            } catch (err) {
+                const detail = err.response?.data ?? err.message;
+                logger.error(`unassignRole failed | userId=${userId} roleId=${removeRole.id}\n${JSON.stringify(detail, null, 2)}`);
+                result.unassign = {
+                    success: false,
+                    error: "Roblox API error during unassign"
+                };
+            }
+        }
+    }
+
+    const ops = Object.values(result);
+    const successCount = ops.filter(op => op.success).length;
+    const overallSuccess = (successCount === ops.length);
+
+    // 200 - everything requested succeeded
+    // 207 - some operations succeeded, some failed (partial)
+    // 500 - every operation failed
+    const statusCode = (overallSuccess ? 200 : ((successCount > 0) ? 207 : 500));
+
+    logger.info(`Rank update complete | userId=${userId} status=${statusCode} assign=${JSON.stringify(result.assign ?? null)} unassign=${JSON.stringify(result.unassign ?? null)}`);
+
+    return res.status(statusCode).json({
+        success: overallSuccess,
+        userId,
+        groupId: GROUP_ID,
+        ...result
+    });
 });
 
 app.post("/queue-log", accessKeyAuth, async (req, res) => {
