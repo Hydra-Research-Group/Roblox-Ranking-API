@@ -6,6 +6,10 @@ Created by [Hydra Research Group](https://github.com/orgs/Hydra-Research-Group).
 
 ---
 
+# BELOW INFORMATION WILL BE REVISED/REWRITTEN SOON, AS IT IS NO LONGER UP-TO-DATE
+
+---
+
 # ✨ Features
 
 * ✅ Roblox group rank updates via Roblox Cloud API

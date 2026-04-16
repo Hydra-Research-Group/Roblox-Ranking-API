@@ -6,6 +6,8 @@ const Joi = require("joi");
 const {
     fetchMembership,
     fetchRoleByRank,
+    fetchAllRoles,
+    resolveUser,
     assignRole,
     unassignRole
 } = require("./roblox-api");
@@ -56,7 +58,6 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3080;
-const GROUP_ID = process.env.GROUP_ID;
 
 /* -------------------- Routes -------------------- */
 
@@ -69,6 +70,7 @@ app.get("/", (_, res) => {
 
 app.patch("/update-rank", accessKeyAuth, async (req, res) => {
     const schema = Joi.object({
+        groupId: Joi.number().integer().positive().required(),
         userId: Joi.number().integer().positive().required(),
         addRank: Joi.number().integer().min(1).max(254).optional(),
         removeRank: Joi.number().integer().min(1).max(254).optional()
@@ -79,9 +81,9 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
         return res.status(400).json({ error: error.details[0].message });
     }
 
-    const { userId, addRank, removeRank } = value;
+    const { groupId, userId, addRank, removeRank } = value;
 
-    let membershipId = getMembership(GROUP_ID, userId);
+    let membershipId = getMembership(groupId, userId);
 
     if (membershipId) {
         metrics.membershipHits++;
@@ -90,7 +92,7 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
 
         let membership;
         try {
-            membership = await fetchMembership(GROUP_ID, userId);
+            membership = await fetchMembership(groupId, userId);
         } catch (err) {
             logger.error(`Failed to fetch membership for userId=${userId}: ${err.message}`);
             return res.status(500).json({ error: "Failed to fetch membership" });
@@ -101,46 +103,46 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
         }
 
         membershipId = membership.path.split("/").pop();
-        saveMembership(GROUP_ID, userId, membershipId);
+        saveMembership(groupId, userId, membershipId);
     }
 
     let addRole = null;
     let removeRole = null;
 
     if (addRank !== undefined) {
-        addRole = getRoleByRank(GROUP_ID, addRank);
+        addRole = getRoleByRank(groupId, addRank);
 
         if (addRole) {
             metrics.roleHits++;
         } else {
             metrics.roleMisses++;
             try {
-                addRole = await fetchRoleByRank(GROUP_ID, addRank);
+                addRole = await fetchRoleByRank(groupId, addRank);
             } catch (err) {
                 logger.error(`Failed to fetch role for addRank=${addRank}: ${err.message}`);
             }
 
             if (addRole) {
-                saveRoleByRank(GROUP_ID, addRank, addRole);
+                saveRoleByRank(groupId, addRank, addRole);
             }
         }
     }
 
     if (removeRank !== undefined) {
-        removeRole = getRoleByRank(GROUP_ID, removeRank);
+        removeRole = getRoleByRank(groupId, removeRank);
 
         if (removeRole) {
             metrics.roleHits++;
         } else {
             metrics.roleMisses++;
             try {
-                removeRole = await fetchRoleByRank(GROUP_ID, removeRank);
+                removeRole = await fetchRoleByRank(groupId, removeRank);
             } catch (err) {
                 logger.error(`Failed to fetch role for removeRank=${removeRank}: ${err.message}`);
             }
 
             if (removeRole) {
-                saveRoleByRank(GROUP_ID, removeRank, removeRole);
+                saveRoleByRank(groupId, removeRank, removeRole);
             }
         }
     }
@@ -155,7 +157,7 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
             };
         } else {
             try {
-                await assignRole(GROUP_ID, membershipId, addRole.id);
+                await assignRole(groupId, membershipId, addRole.id);
                 result.assign = {
                     success: true,
                     roleId: addRole.id,
@@ -180,7 +182,7 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
             };
         } else {
             try {
-                await unassignRole(GROUP_ID, membershipId, removeRole.id);
+                await unassignRole(groupId, membershipId, removeRole.id);
                 result.unassign = {
                     success: true,
                     roleId: removeRole.id,
@@ -201,19 +203,64 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
     const successCount = ops.filter(op => op.success).length;
     const overallSuccess = (successCount === ops.length);
 
-    // 200 - everything requested succeeded
-    // 207 - some operations succeeded, some failed (partial)
-    // 500 - every operation failed
     const statusCode = (overallSuccess ? 200 : ((successCount > 0) ? 207 : 500));
 
-    logger.info(`Rank update complete | userId=${userId} status=${statusCode} assign=${JSON.stringify(result.assign ?? null)} unassign=${JSON.stringify(result.unassign ?? null)}`);
+    logger.info(`Rank update complete | groupId=${groupId} userId=${userId} status=${statusCode} assign=${JSON.stringify(result.assign ?? null)} unassign=${JSON.stringify(result.unassign ?? null)}`);
 
     return res.status(statusCode).json({
         success: overallSuccess,
         userId,
-        groupId: GROUP_ID,
+        groupId,
         ...result
     });
+});
+
+app.get("/groups/:groupId/roles", accessKeyAuth, async (req, res) => {
+    const groupId = Number(req.params.groupId);
+
+    if (!Number.isInteger(groupId) || groupId <= 0) {
+        return res.status(400).json({ error: "groupId must be a positive integer" });
+    }
+
+    try {
+        const roles = await fetchAllRoles(groupId);
+        return res.json({ success: true, groupId, roles });
+    } catch (err) {
+        logger.error(`fetchAllRoles failed | groupId=${groupId}: ${err.message}`);
+
+        if (err.response?.status === 403) {
+            return res.status(403).json({ error: "API key does not have access to this group" });
+        }
+        if (err.response?.status === 404) {
+            return res.status(404).json({ error: "Group not found" });
+        }
+
+        return res.status(500).json({ error: "Failed to fetch roles" });
+    }
+});
+
+app.get("/users/resolve", accessKeyAuth, async (req, res) => {
+    const schema = Joi.object({
+        username: Joi.string().min(3).max(20).required()
+    });
+
+    const { error, value } = schema.validate(req.query);
+    if (error) {
+        return res.status(400).json({ error: error.details[0].message });
+    }
+
+    try {
+        const user = await resolveUser(value.username);
+
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        return res.json({ success: true, ...user });
+    } catch (err) {
+        logger.error(`resolveUser failed | username=${value.username}: ${err.message}`);
+        return res.status(500).json({ error: "Failed to resolve user" });
+    }
 });
 
 app.post("/queue-log", accessKeyAuth, async (req, res) => {
