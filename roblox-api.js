@@ -37,7 +37,7 @@ async function fetchMemberRank(groupId, userId) {
         const res = await apiClient.get(url);
 
         for (const role of res.data.groupRoles) {
-            if (role.id === roleId) return role.rank;
+            if (role.id === roleId) return { rank: role.rank, roleId: role.id };
         }
 
         nextPageToken = res.data.nextPageToken;

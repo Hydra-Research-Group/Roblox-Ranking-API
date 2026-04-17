@@ -282,7 +282,7 @@ app.get("/groups/:groupId/members/:userId/rank", accessKeyAuth, async (req, res)
             return res.status(404).json({ error: "User is not a member of this group" });
         }
 
-        return res.json({ success: true, groupId, userId, rank });
+        return res.json({ success: true, groupId, userId, rank: rank.rank, roleId: rank.roleId });
     } catch (err) {
         logger.error("fetchMemberRank failed | groupId=" + groupId + " userId=" + userId + ": " + err.message);
         return res.status(500).json({ error: "Failed to fetch member rank" });
