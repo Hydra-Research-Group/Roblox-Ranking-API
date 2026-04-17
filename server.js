@@ -5,6 +5,7 @@ const helmet = require("helmet");
 const Joi = require("joi");
 const {
     fetchMembership,
+    fetchMemberRank,
     fetchRoleByRank,
     fetchAllRoles,
     resolveUser,
@@ -260,6 +261,31 @@ app.get("/users/resolve", accessKeyAuth, async (req, res) => {
     } catch (err) {
         logger.error(`resolveUser failed | username=${value.username}: ${err.message}`);
         return res.status(500).json({ error: "Failed to resolve user" });
+    }
+});
+
+app.get("/groups/:groupId/members/:userId/rank", accessKeyAuth, async (req, res) => {
+    const groupId = Number(req.params.groupId);
+    const userId = Number(req.params.userId);
+
+    if (!Number.isInteger(groupId) || groupId <= 0) {
+        return res.status(400).json({ error: "groupId must be a positive integer" });
+    }
+    if (!Number.isInteger(userId) || userId <= 0) {
+        return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+
+    try {
+        const rank = await fetchMemberRank(groupId, userId);
+
+        if (rank === null) {
+            return res.status(404).json({ error: "User is not a member of this group" });
+        }
+
+        return res.json({ success: true, groupId, userId, rank });
+    } catch (err) {
+        logger.error("fetchMemberRank failed | groupId=" + groupId + " userId=" + userId + ": " + err.message);
+        return res.status(500).json({ error: "Failed to fetch member rank" });
     }
 });
 

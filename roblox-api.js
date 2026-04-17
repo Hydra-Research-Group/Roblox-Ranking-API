@@ -22,6 +22,30 @@ async function fetchMembership(groupId, userId) {
     return res.data.groupMemberships?.[0] ?? null;
 }
 
+async function fetchMemberRank(groupId, userId) {
+    const membership = await fetchMembership(groupId, userId);
+    if (!membership) return null;
+
+    const roleId = membership.role?.split('/').pop();
+    if (!roleId) return null;
+
+    const rolesUrl = `${GROUPS_URL}/${groupId}/roles?maxPageSize=100`;
+    let nextPageToken;
+
+    do {
+        const url = nextPageToken ? `${rolesUrl}&pageToken=${nextPageToken}` : rolesUrl;
+        const res = await apiClient.get(url);
+
+        for (const role of res.data.groupRoles) {
+            if (role.id === roleId) return role.rank;
+        }
+
+        nextPageToken = res.data.nextPageToken;
+    } while (nextPageToken);
+
+    return null;
+}
+
 async function fetchRoleByRank(groupId, rank) {
     let nextPageToken;
     const baseUrl = `${GROUPS_URL}/${groupId}/roles?maxPageSize=100`;
@@ -142,6 +166,7 @@ async function unassignRole(groupId, membershipId, roleId) {
 
 module.exports = {
     fetchMembership,
+    fetchMemberRank,
     fetchRoleByRank,
     fetchAllRoles,
     resolveUser,
