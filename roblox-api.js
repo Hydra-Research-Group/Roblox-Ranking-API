@@ -164,6 +164,24 @@ async function unassignRole(groupId, membershipId, roleId) {
     return res.data;
 }
 
+async function acceptJoinRequest(groupId, userId) {
+    const url = `${GROUPS_URL}/${groupId}/join-requests/users/${userId}:approve`;
+    const res = await apiClient.post(url, {});
+    return res.data;
+}
+
+async function declineJoinRequest(groupId, userId) {
+    const url = `${GROUPS_URL}/${groupId}/join-requests/users/${userId}:decline`;
+    const res = await apiClient.post(url, {});
+    return res.data;
+}
+
+async function exileMember(groupId, membershipId) {
+    const url = `${GROUPS_URL}/${groupId}/memberships/${membershipId}`;
+    const res = await apiClient.delete(url);
+    return res.data;
+}
+
 module.exports = {
     fetchMembership,
     fetchMemberRank,
@@ -171,5 +189,8 @@ module.exports = {
     fetchAllRoles,
     resolveUser,
     assignRole,
-    unassignRole
+    unassignRole,
+    acceptJoinRequest,
+    declineJoinRequest,
+    exileMember
 };
