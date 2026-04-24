@@ -142,23 +142,11 @@ async function unassignRole(groupId, membershipId, roleId) {
 }
 
 async function acceptJoinRequest(groupId, userId) {
-    const requests = await _paginate(
-        `${GROUPS_URL}/${groupId}/join-requests?maxPageSize=1&filter=user=='users/${userId}'`,
-        "groupJoinRequests"
-    );
-
-    const joinRequest = requests[0] ?? null;
-    if (!joinRequest) {
-        const err = new Error("Join request not found");
-        err.status = 404;
-        throw err;
-    }
-
-    const joinRequestId = joinRequest.path.split("/").pop();
     const res = await apiClient.post(
-        `${GROUPS_URL}/${groupId}/join-requests/${joinRequestId}:approve`,
+        `${GROUPS_URL}/${groupId}/join-requests/${userId}:accept`,
         {}
     );
+
     return res.data;
 }
 
