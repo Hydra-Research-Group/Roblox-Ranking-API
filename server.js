@@ -12,21 +12,16 @@ const {
     assignRole,
     unassignRole,
     acceptJoinRequest,
-    declineJoinRequest,
-    exileMember
+    exileMember,
 } = require("./roblox-api");
 const {
     getMembership,
     saveMembership,
-    getRoleByRank,
-    saveRoleByRank,
-    clearAllCaches
+    deleteMembership,
+    clearAllCaches,
 } = require("./cache");
 const logger = require("./logger");
-const {
-    accessKeyAuth,
-    adminKeyAuth
-} = require("./middleware/keyAuth");
+const { accessKeyAuth, adminKeyAuth } = require("./middleware/keyAuth");
 const { enqueueLog, workerLoop, queues, getCooldownUntil } = require("./queue");
 
 require("dotenv").config({ quiet: true });
@@ -37,7 +32,7 @@ app.set("trust proxy", 1);
 
 const limiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 40
+    max: 40,
 });
 
 app.use(express.json());
@@ -46,14 +41,7 @@ app.use(limiter);
 app.disable("x-powered-by");
 
 let totalRequests = 0;
-let apiStartTime = Date.now();
-
-let metrics = {
-    membershipHits: 0,
-    membershipMisses: 0,
-    roleHits: 0,
-    roleMisses: 0
-};
+const apiStartTime = Date.now();
 
 app.use((req, res, next) => {
     totalRequests++;
@@ -63,12 +51,26 @@ app.use((req, res, next) => {
 
 const PORT = process.env.PORT || 3080;
 
-/* -------------------- Routes -------------------- */
+async function resolveMembershipId(groupId, userId) {
+    const cached = getMembership(groupId, userId);
+
+    if (cached) {
+        return cached;
+    }
+
+    const membership = await fetchMembership(groupId, userId);
+
+    if (!membership) return null;
+
+    const membershipId = membership.path.split("/").pop();
+    saveMembership(groupId, userId, membershipId);
+    return membershipId;
+}
 
 app.get("/", (_, res) => {
     res.json({
         type: "Custom Roblox Ranking and Webhook Proxy API",
-        status: "OK"
+        status: "OK",
     });
 });
 
@@ -77,7 +79,7 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
         groupId: Joi.number().integer().positive().required(),
         userId: Joi.number().integer().positive().required(),
         addRank: Joi.number().integer().min(1).max(254).optional(),
-        removeRank: Joi.number().integer().min(1).max(254).optional()
+        removeRank: Joi.number().integer().min(1).max(254).optional(),
     }).or("addRank", "removeRank");
 
     const { error, value } = schema.validate(req.body);
@@ -87,127 +89,95 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
 
     const { groupId, userId, addRank, removeRank } = value;
 
-    let membershipId = getMembership(groupId, userId);
+    let membershipId;
+    try {
+        membershipId = await resolveMembershipId(groupId, userId);
+    } catch (err) {
+        logger.error(`Failed to fetch membership for userId=${userId}: ${err.message}`);
+        return res.status(500).json({ error: "Failed to fetch membership" });
+    }
 
-    if (membershipId) {
-        metrics.membershipHits++;
-    } else {
-        metrics.membershipMisses++;
-
-        let membership;
-        try {
-            membership = await fetchMembership(groupId, userId);
-        } catch (err) {
-            logger.error(`Failed to fetch membership for userId=${userId}: ${err.message}`);
-            return res.status(500).json({ error: "Failed to fetch membership" });
-        }
-
-        if (!membership) {
-            return res.status(404).json({ error: "Membership not found" });
-        }
-
-        membershipId = membership.path.split("/").pop();
-        saveMembership(groupId, userId, membershipId);
+    if (!membershipId) {
+        return res.status(404).json({ error: "Membership not found" });
     }
 
     let addRole = null;
     let removeRole = null;
 
     if (addRank !== undefined) {
-        addRole = getRoleByRank(groupId, addRank);
-
-        if (addRole) {
-            metrics.roleHits++;
-        } else {
-            metrics.roleMisses++;
-            try {
-                addRole = await fetchRoleByRank(groupId, addRank);
-            } catch (err) {
-                logger.error(`Failed to fetch role for addRank=${addRank}: ${err.message}`);
-            }
-
-            if (addRole) {
-                saveRoleByRank(groupId, addRank, addRole);
-            }
+        try {
+            addRole = await fetchRoleByRank(groupId, addRank);
+        } catch (err) {
+            logger.error(`Failed to fetch role for addRank=${addRank}: ${err.message}`);
         }
     }
 
     if (removeRank !== undefined) {
-        removeRole = getRoleByRank(groupId, removeRank);
+        try {
+            removeRole = await fetchRoleByRank(groupId, removeRank);
+        } catch (err) {
+            logger.error(`Failed to fetch role for removeRank=${removeRank}: ${err.message}`);
+        }
+    }
 
-        if (removeRole) {
-            metrics.roleHits++;
-        } else {
-            metrics.roleMisses++;
-            try {
-                removeRole = await fetchRoleByRank(groupId, removeRank);
-            } catch (err) {
-                logger.error(`Failed to fetch role for removeRank=${removeRank}: ${err.message}`);
+    async function attemptRoleOp(op, role) {
+        const opFn = op === "assign" ? assignRole : unassignRole;
+
+        try {
+            await opFn(groupId, membershipId, role.id);
+            return { success: true, roleId: role.id, roleName: role.displayName };
+        } catch (err) {
+            if (err.response?.status === 404) {
+                logger.warn(`${op} got 404 for membershipId=${membershipId} — busting cache and retrying`);
+                deleteMembership(groupId, userId);
+
+                let freshMembershipId;
+                try {
+                    const freshMembership = await fetchMembership(groupId, userId);
+                    if (!freshMembership) {
+                        return { success: false, error: "User is no longer a member of this group" };
+                    }
+                    freshMembershipId = freshMembership.path.split("/").pop();
+                    saveMembership(groupId, userId, freshMembershipId);
+                } catch (fetchErr) {
+                    logger.error(`Re-fetch membership failed after 404 | userId=${userId}: ${fetchErr.message}`);
+                    return { success: false, error: "Failed to re-fetch membership after stale cache" };
+                }
+
+                try {
+                    await opFn(groupId, freshMembershipId, role.id);
+                    return { success: true, roleId: role.id, roleName: role.displayName };
+                } catch (retryErr) {
+                    const detail = retryErr.response?.data ?? retryErr.message;
+                    logger.error(`${op} retry failed | userId=${userId} roleId=${role.id}\n${JSON.stringify(detail, null, 2)}`);
+                    return { success: false, error: `Roblox API error during ${op} (retry)` };
+                }
             }
 
-            if (removeRole) {
-                saveRoleByRank(groupId, removeRank, removeRole);
-            }
+            const detail = err.response?.data ?? err.message;
+            logger.error(`${op} failed | userId=${userId} roleId=${role.id}\n${JSON.stringify(detail, null, 2)}`);
+            return { success: false, error: `Roblox API error during ${op}` };
         }
     }
 
     const result = {};
 
     if (addRank !== undefined) {
-        if (!addRole) {
-            result.assign = {
-                success: false,
-                error: "Role not found for addRank"
-            };
-        } else {
-            try {
-                await assignRole(groupId, membershipId, addRole.id);
-                result.assign = {
-                    success: true,
-                    roleId: addRole.id,
-                    roleName: addRole.displayName
-                };
-            } catch (err) {
-                const detail = err.response?.data ?? err.message;
-                logger.error(`assignRole failed | userId=${userId} roleId=${addRole.id}\n${JSON.stringify(detail, null, 2)}`);
-                result.assign = {
-                    success: false,
-                    error: "Roblox API error during assign"
-                };
-            }
-        }
+        result.assign = addRole
+            ? await attemptRoleOp("assign", addRole)
+            : { success: false, error: "Role not found for addRank" };
     }
 
     if (removeRank !== undefined) {
-        if (!removeRole) {
-            result.unassign = {
-                success: false,
-                error: "Role not found for removeRank"
-            };
-        } else {
-            try {
-                await unassignRole(groupId, membershipId, removeRole.id);
-                result.unassign = {
-                    success: true,
-                    roleId: removeRole.id,
-                    roleName: removeRole.displayName
-                };
-            } catch (err) {
-                const detail = err.response?.data ?? err.message;
-                logger.error(`unassignRole failed | userId=${userId} roleId=${removeRole.id}\n${JSON.stringify(detail, null, 2)}`);
-                result.unassign = {
-                    success: false,
-                    error: "Roblox API error during unassign"
-                };
-            }
-        }
+        result.unassign = removeRole
+            ? await attemptRoleOp("unassign", removeRole)
+            : { success: false, error: "Role not found for removeRank" };
     }
 
     const ops = Object.values(result);
     const successCount = ops.filter(op => op.success).length;
-    const overallSuccess = (successCount === ops.length);
-
-    const statusCode = (overallSuccess ? 200 : ((successCount > 0) ? 207 : 500));
+    const overallSuccess = successCount === ops.length;
+    const statusCode = overallSuccess ? 200 : (successCount > 0 ? 207 : 500);
 
     logger.info(`Rank update complete | groupId=${groupId} userId=${userId} status=${statusCode} assign=${JSON.stringify(result.assign ?? null)} unassign=${JSON.stringify(result.unassign ?? null)}`);
 
@@ -215,7 +185,7 @@ app.patch("/update-rank", accessKeyAuth, async (req, res) => {
         success: overallSuccess,
         userId,
         groupId,
-        ...result
+        ...result,
     });
 });
 
@@ -245,7 +215,7 @@ app.get("/groups/:groupId/roles", accessKeyAuth, async (req, res) => {
 
 app.get("/users/resolve", accessKeyAuth, async (req, res) => {
     const schema = Joi.object({
-        username: Joi.string().min(3).max(20).required()
+        username: Joi.string().min(3).max(20).required(),
     });
 
     const { error, value } = schema.validate(req.query);
@@ -287,7 +257,7 @@ app.get("/groups/:groupId/members/:userId/rank", accessKeyAuth, async (req, res)
 
         return res.json({ success: true, groupId, userId, rank: rank.rank, roleId: rank.roleId });
     } catch (err) {
-        logger.error("fetchMemberRank failed | groupId=" + groupId + " userId=" + userId + ": " + err.message);
+        logger.error(`fetchMemberRank failed | groupId=${groupId} userId=${userId}: ${err.message}`);
         return res.status(500).json({ error: "Failed to fetch member rank" });
     }
 });
@@ -307,13 +277,16 @@ app.post("/groups/:groupId/join-requests/:userId/accept", accessKeyAuth, async (
         await acceptJoinRequest(groupId, userId);
         return res.json({ success: true, groupId, userId });
     } catch (err) {
-        logger.error("acceptJoinRequest failed | groupId=" + groupId + " userId=" + userId + ": " + err.message);
-        if (err.response?.status === 404) {
+        logger.error(`acceptJoinRequest failed | groupId=${groupId} userId=${userId}: ${err.message}`);
+
+        const status = err.status ?? err.response?.status;
+        if (status === 404) {
             return res.status(404).json({ error: "Join request not found for this user" });
         }
-        if (err.response?.status === 403) {
+        if (status === 403) {
             return res.status(403).json({ error: "Bot does not have permission to manage join requests in this group" });
         }
+
         return res.status(500).json({ error: "Failed to accept join request" });
     }
 });
@@ -337,15 +310,17 @@ app.post("/groups/:groupId/members/:userId/exile", accessKeyAuth, async (req, re
         }
         membershipId = membership.path.split("/").pop();
     } catch (err) {
-        logger.error("fetchMembership failed for exile | groupId=" + groupId + " userId=" + userId + ": " + err.message);
+        logger.error(`fetchMembership failed for exile | groupId=${groupId} userId=${userId}: ${err.message}`);
         return res.status(500).json({ error: "Failed to fetch membership" });
     }
 
     try {
         await exileMember(groupId, membershipId);
+
+        deleteMembership(groupId, userId);
         return res.json({ success: true, groupId, userId });
     } catch (err) {
-        logger.error("exileMember failed | groupId=" + groupId + " membershipId=" + membershipId + ": " + err.message);
+        logger.error(`exileMember failed | groupId=${groupId} membershipId=${membershipId}: ${err.message}`);
         if (err.response?.status === 403) {
             return res.status(403).json({ error: "Bot does not have permission to exile members in this group" });
         }
@@ -357,26 +332,20 @@ app.post("/queue-log", accessKeyAuth, async (req, res) => {
     const schema = Joi.object({
         system: Joi.string().required(),
         content: Joi.string().optional(),
-        embeds: Joi.array().optional()
+        embeds: Joi.array().optional(),
     }).or("content", "embeds");
 
     const { error, value } = schema.validate(req.body);
     if (error) {
-        return res.status(400).json({
-            error: error.details[0].message
-        });
+        return res.status(400).json({ error: error.details[0].message });
     }
 
-    const { system, content, embeds } = value;
-
-    enqueueLog(system.toLowerCase(), {
-        content,
-        embeds
+    enqueueLog(value.system.toLowerCase(), {
+        content: value.content,
+        embeds: value.embeds,
     });
 
-    res.json({
-        success: true
-    });
+    return res.json({ success: true });
 });
 
 app.get("/queue-inspect", adminKeyAuth, (_, res) => {
@@ -387,38 +356,35 @@ app.get("/queue-inspect", adminKeyAuth, (_, res) => {
             count: logs.length,
             logs: logs.map(log => ({
                 ...(log.content !== undefined && { content: log.content }),
-                ...(log.embeds !== undefined && { embeds: log.embeds })
-            }))
+                ...(log.embeds !== undefined && { embeds: log.embeds }),
+            })),
         };
     }
 
     const cooldownUntil = getCooldownUntil();
     const now = Date.now();
 
-    res.json({
+    return res.json({
         totalSystems: Object.keys(snapshot).length,
         cooldownActive: now < cooldownUntil,
-        cooldownRemainingMs: (now < cooldownUntil) ? (cooldownUntil - now) : 0,
-        systems: snapshot
+        cooldownRemainingMs: now < cooldownUntil ? cooldownUntil - now : 0,
+        systems: snapshot,
     });
 });
 
 app.get("/metrics", adminKeyAuth, (_, res) => {
     const uptimeSeconds = Math.floor((Date.now() - apiStartTime) / 1000);
 
-    res.json({
+    return res.json({
         uptime: `${uptimeSeconds}s`,
         totalRequests,
-        cache: metrics
     });
 });
 
 app.post("/clear-cache", adminKeyAuth, (_, res) => {
     clearAllCaches();
-    res.json({ message: "All caches cleared" });
+    return res.json({ message: "All caches cleared" });
 });
-
-/* -------------------- Startup / Shutdown -------------------- */
 
 const sendStartupLog = async () => {
     if (!process.env.STATUS_WEBHOOK) return;
@@ -429,12 +395,10 @@ const sendStartupLog = async () => {
                 title: "「 API STATUS 」",
                 description: "The API has been successfully restarted.",
                 color: 5763719,
-                footer: {
-                    text: "© Hydra Research & Development"
-                },
-                timestamp: new Date().toISOString()
-            }
-        ]
+                footer: { text: "© Hydra Research & Development" },
+                timestamp: new Date().toISOString(),
+            },
+        ],
     };
 
     if (process.env.DEVELOPER_PING) {
@@ -443,16 +407,14 @@ const sendStartupLog = async () => {
 
     try {
         await axios.post(process.env.STATUS_WEBHOOK, payload, { timeout: 5000 });
-    } catch (error) {
-        logger.error(`Error sending startup log: ${error.message}`);
+    } catch (err) {
+        logger.error(`Error sending startup log: ${err.message}`);
     }
 };
 
 const server = app.listen(PORT, async () => {
     logger.info(`API running on port ${PORT}`);
-
     workerLoop();
-
     await sendStartupLog();
 });
 

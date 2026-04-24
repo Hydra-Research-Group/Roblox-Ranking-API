@@ -1,30 +1,34 @@
 const NodeCache = require("node-cache");
 
 const membershipsCache = new NodeCache({ stdTTL: 600, checkperiod: 60 });
-const rolesCache = new NodeCache({ stdTTL: 1800, checkperiod: 180 });
+const rolesCache = new NodeCache({ stdTTL: 900, checkperiod: 90 });
 
 function membershipKey(groupId, userId) {
     return `${groupId}:${userId}`;
 }
 
-function roleKey(groupId, rank) {
-    return `${groupId}:${rank}`;
-}
-
 function getMembership(groupId, userId) {
-    return membershipsCache.get(membershipKey(groupId, userId));
+    return membershipsCache.get(membershipKey(groupId, userId)) ?? null;
 }
 
 function saveMembership(groupId, userId, membershipId) {
     membershipsCache.set(membershipKey(groupId, userId), membershipId);
 }
 
-function getRoleByRank(groupId, rank) {
-    return rolesCache.get(roleKey(groupId, rank));
+function deleteMembership(groupId, userId) {
+    membershipsCache.del(membershipKey(groupId, userId));
 }
 
-function saveRoleByRank(groupId, rank, role) {
-    rolesCache.set(roleKey(groupId, rank), role);
+function getRoles(groupId) {
+    return rolesCache.get(String(groupId)) ?? null;
+}
+
+function saveRoles(groupId, roles) {
+    rolesCache.set(String(groupId), roles);
+}
+
+function deleteRoles(groupId) {
+    rolesCache.del(String(groupId));
 }
 
 function clearAllCaches() {
@@ -35,7 +39,9 @@ function clearAllCaches() {
 module.exports = {
     getMembership,
     saveMembership,
-    getRoleByRank,
-    saveRoleByRank,
-    clearAllCaches
+    deleteMembership,
+    getRoles,
+    saveRoles,
+    deleteRoles,
+    clearAllCaches,
 };

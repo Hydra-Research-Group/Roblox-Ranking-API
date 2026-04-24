@@ -1,5 +1,6 @@
 const axios = require("axios");
 const logger = require("./logger");
+const { getRoles, saveRoles } = require("./cache");
 require("dotenv").config({ quiet: true });
 
 const API_KEY = process.env.API_KEY;
@@ -16,9 +17,66 @@ const apiClient = axios.create({
 
 const publicClient = axios.create({ timeout: 8000 });
 
+async function _paginate(baseUrl, itemsKey, filter = null) {
+    const results = [];
+    let nextPageToken;
+
+    do {
+        const url = nextPageToken ? `${baseUrl}&pageToken=${nextPageToken}` : baseUrl;
+        const res = await apiClient.get(url);
+        const items = res.data[itemsKey] ?? [];
+
+        for (const item of items) {
+            if (!filter || filter(item)) {
+                results.push(item);
+            }
+        }
+
+        nextPageToken = res.data.nextPageToken;
+    } while (nextPageToken);
+
+    return results;
+}
+
+async function fetchAllRoles(groupId) {
+    const cached = getRoles(groupId);
+    if (cached) return cached;
+
+    const raw = await _paginate(
+        `${GROUPS_URL}/${groupId}/roles?maxPageSize=100`,
+        "groupRoles",
+        role => role.rank > 0
+    );
+
+    const roles = raw
+        .map(role => ({ id: role.id, rank: role.rank, displayName: role.displayName }))
+        .sort((a, b) => a.rank - b.rank);
+
+    saveRoles(groupId, roles);
+    return roles;
+}
+
+async function fetchRoleByRank(groupId, rank) {
+    const roles = await fetchAllRoles(groupId);
+    const candidates = roles.filter(r => r.rank === rank);
+
+    if (candidates.length === 0) return null;
+
+    if (candidates.length > 1) {
+        logger.warn(
+            `Multiple roles found for rank=${rank} in groupId=${groupId}: ` +
+            `[${candidates.map(r => `${r.id}(${r.displayName})`).join(", ")}] ` +
+            `- using ${candidates[0].id}(${candidates[0].displayName})`
+        );
+    }
+
+    return candidates[0];
+}
+
 async function fetchMembership(groupId, userId) {
-    const url = `${GROUPS_URL}/${groupId}/memberships?maxPageSize=1&filter=user=='users/${userId}'`;
-    const res = await apiClient.get(url);
+    const res = await apiClient.get(
+        `${GROUPS_URL}/${groupId}/memberships?maxPageSize=1&filter=user=='users/${userId}'`
+    );
     return res.data.groupMemberships?.[0] ?? null;
 }
 
@@ -26,84 +84,14 @@ async function fetchMemberRank(groupId, userId) {
     const membership = await fetchMembership(groupId, userId);
     if (!membership) return null;
 
-    const roleId = membership.role?.split('/').pop();
+    const roleId = membership.role?.split("/").pop();
     if (!roleId) return null;
 
-    const rolesUrl = `${GROUPS_URL}/${groupId}/roles?maxPageSize=100`;
-    let nextPageToken;
+    const roles = await fetchAllRoles(groupId);
+    const role = roles.find(r => r.id === roleId);
+    if (!role) return null;
 
-    do {
-        const url = nextPageToken ? `${rolesUrl}&pageToken=${nextPageToken}` : rolesUrl;
-        const res = await apiClient.get(url);
-
-        for (const role of res.data.groupRoles) {
-            if (role.id === roleId) return { rank: role.rank, roleId: role.id };
-        }
-
-        nextPageToken = res.data.nextPageToken;
-    } while (nextPageToken);
-
-    return null;
-}
-
-async function fetchRoleByRank(groupId, rank) {
-    let nextPageToken;
-    const baseUrl = `${GROUPS_URL}/${groupId}/roles?maxPageSize=100`;
-    const candidates = [];
-
-    do {
-        const url = nextPageToken
-            ? `${baseUrl}&pageToken=${nextPageToken}`
-            : baseUrl;
-
-        const res = await apiClient.get(url);
-
-        for (const role of res.data.groupRoles) {
-            if ((role.rank === rank) && (typeof role.id === "string")) {
-                candidates.push(role);
-            }
-        }
-
-        nextPageToken = res.data.nextPageToken;
-    } while (nextPageToken);
-
-    if (candidates.length === 0) return null;
-
-    candidates.sort((a, b) => Number(a.id) - Number(b.id));
-    if (candidates.length > 1) {
-        logger.warn(`Multiple roles found for rank=${rank} in groupId=${groupId}: [${candidates.map(r => `${r.id}(${r.displayName})`).join(", ")}] - using ${candidates[0].id}(${candidates[0].displayName})`);
-    }
-
-    return candidates[0];
-}
-
-async function fetchAllRoles(groupId) {
-    let nextPageToken;
-    const baseUrl = `${GROUPS_URL}/${groupId}/roles?maxPageSize=100`;
-    const roles = [];
-
-    do {
-        const url = nextPageToken
-            ? `${baseUrl}&pageToken=${nextPageToken}`
-            : baseUrl;
-
-        const res = await apiClient.get(url);
-
-        for (const role of res.data.groupRoles) {
-            if (role.rank > 0) {
-                roles.push({
-                    id: role.id,
-                    rank: role.rank,
-                    displayName: role.displayName,
-                });
-            }
-        }
-
-        nextPageToken = res.data.nextPageToken;
-    } while (nextPageToken);
-
-    roles.sort((a, b) => a.rank - b.rank);
-    return roles;
+    return { rank: role.rank, roleId: role.id };
 }
 
 async function resolveUser(username) {
@@ -132,65 +120,63 @@ async function resolveUser(username) {
         logger.warn(`Failed to fetch avatar for userId=${userId}: ${err.message}`);
     }
 
-    return {
-        userId,
-        username: resolvedUsername,
-        displayName,
-        avatarUrl,
-    };
+    return { userId, username: resolvedUsername, displayName, avatarUrl };
 }
 
 async function assignRole(groupId, membershipId, roleId) {
-    const url = `${GROUPS_URL}/${groupId}/memberships/${membershipId}:assignRole`;
-    const body = {
-        role: `groups/${groupId}/roles/${roleId}`
-    };
-
     logger.info(`Assigning role | groupId=${groupId} membershipId=${membershipId} roleId=${roleId}`);
-
-    const res = await apiClient.post(url, body);
+    const url = `${GROUPS_URL}/${groupId}/memberships/${membershipId}:assignRole`;
+    const res = await apiClient.post(url, {
+        role: `groups/${groupId}/roles/${roleId}`
+    });
     return res.data;
 }
 
 async function unassignRole(groupId, membershipId, roleId) {
-    const url = `${GROUPS_URL}/${groupId}/memberships/${membershipId}:unassignRole`;
-    const body = {
-        role: `groups/${groupId}/roles/${roleId}`
-    };
-
     logger.info(`Unassigning role | groupId=${groupId} membershipId=${membershipId} roleId=${roleId}`);
-
-    const res = await apiClient.post(url, body);
+    const url = `${GROUPS_URL}/${groupId}/memberships/${membershipId}:unassignRole`;
+    const res = await apiClient.post(url, {
+        role: `groups/${groupId}/roles/${roleId}`
+    });
     return res.data;
 }
 
 async function acceptJoinRequest(groupId, userId) {
-    const url = `${GROUPS_URL}/${groupId}/join-requests/users/${userId}:approve`;
-    const res = await apiClient.post(url, {});
-    return res.data;
-}
+    const requests = await _paginate(
+        `${GROUPS_URL}/${groupId}/join-requests?maxPageSize=1&filter=user=='users/${userId}'`,
+        "groupJoinRequests"
+    );
 
-async function declineJoinRequest(groupId, userId) {
-    const url = `${GROUPS_URL}/${groupId}/join-requests/users/${userId}:decline`;
-    const res = await apiClient.post(url, {});
+    const joinRequest = requests[0] ?? null;
+    if (!joinRequest) {
+        const err = new Error("Join request not found");
+        err.status = 404;
+        throw err;
+    }
+
+    const joinRequestId = joinRequest.path.split("/").pop();
+    const res = await apiClient.post(
+        `${GROUPS_URL}/${groupId}/join-requests/${joinRequestId}:approve`,
+        {}
+    );
     return res.data;
 }
 
 async function exileMember(groupId, membershipId) {
-    const url = `${GROUPS_URL}/${groupId}/memberships/${membershipId}`;
-    const res = await apiClient.delete(url);
+    const res = await apiClient.delete(
+        `${GROUPS_URL}/${groupId}/memberships/${membershipId}`
+    );
     return res.data;
 }
 
 module.exports = {
+    fetchAllRoles,
+    fetchRoleByRank,
     fetchMembership,
     fetchMemberRank,
-    fetchRoleByRank,
-    fetchAllRoles,
     resolveUser,
     assignRole,
     unassignRole,
     acceptJoinRequest,
-    declineJoinRequest,
-    exileMember
+    exileMember,
 };
