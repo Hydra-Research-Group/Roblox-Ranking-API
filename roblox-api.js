@@ -62,11 +62,10 @@ async function fetchRoleByRank(groupId, rank) {
 
     if (candidates.length === 0) return null;
 
+    candidates.sort((a, b) => Number(a.id) - Number(b.id));
+
     if (candidates.length > 1) {
-        logger.warn(
-            `Multiple roles found for rank=${rank} in groupId=${groupId}: ` +
-            `[${candidates.map(r => `${r.id}(${r.displayName})`).join(", ")}] ` +
-            `- using ${candidates[0].id}(${candidates[0].displayName})`
+        logger.warn(`Multiple roles found for rank=${rank} in groupId=${groupId}: [${candidates.map(r => `${r.id}(${r.displayName})`).join(", ")}] - using ${candidates[0].id}(${candidates[0].displayName})`
         );
     }
 
