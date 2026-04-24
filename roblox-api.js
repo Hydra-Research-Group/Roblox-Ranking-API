@@ -150,13 +150,6 @@ async function acceptJoinRequest(groupId, userId) {
     return res.data;
 }
 
-async function exileMember(groupId, membershipId) {
-    const res = await apiClient.delete(
-        `${GROUPS_URL}/${groupId}/memberships/${membershipId}`
-    );
-    return res.data;
-}
-
 module.exports = {
     fetchAllRoles,
     fetchRoleByRank,
@@ -166,5 +159,4 @@ module.exports = {
     assignRole,
     unassignRole,
     acceptJoinRequest,
-    exileMember,
 };

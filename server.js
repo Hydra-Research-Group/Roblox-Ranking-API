@@ -12,7 +12,6 @@ const {
     assignRole,
     unassignRole,
     acceptJoinRequest,
-    exileMember,
 } = require("./roblox-api");
 const {
     getMembership,
@@ -288,43 +287,6 @@ app.post("/groups/:groupId/join-requests/:userId/accept", accessKeyAuth, async (
         }
 
         return res.status(500).json({ error: "Failed to accept join request" });
-    }
-});
-
-app.post("/groups/:groupId/members/:userId/exile", accessKeyAuth, async (req, res) => {
-    const groupId = Number(req.params.groupId);
-    const userId = Number(req.params.userId);
-
-    if (!Number.isInteger(groupId) || groupId <= 0) {
-        return res.status(400).json({ error: "groupId must be a positive integer" });
-    }
-    if (!Number.isInteger(userId) || userId <= 0) {
-        return res.status(400).json({ error: "userId must be a positive integer" });
-    }
-
-    let membershipId;
-    try {
-        const membership = await fetchMembership(groupId, userId);
-        if (!membership) {
-            return res.status(404).json({ error: "User is not a member of this group" });
-        }
-        membershipId = membership.path.split("/").pop();
-    } catch (err) {
-        logger.error(`fetchMembership failed for exile | groupId=${groupId} userId=${userId}: ${err.message}`);
-        return res.status(500).json({ error: "Failed to fetch membership" });
-    }
-
-    try {
-        await exileMember(groupId, membershipId);
-
-        deleteMembership(groupId, userId);
-        return res.json({ success: true, groupId, userId });
-    } catch (err) {
-        logger.error(`exileMember failed | groupId=${groupId} membershipId=${membershipId}: ${err.message}`);
-        if (err.response?.status === 403) {
-            return res.status(403).json({ error: "Bot does not have permission to exile members in this group" });
-        }
-        return res.status(500).json({ error: "Failed to exile member" });
     }
 });
 
