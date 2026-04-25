@@ -8,11 +8,11 @@ const GROUPS_URL = "https://apis.roblox.com/cloud/v2/groups";
 const USERS_URL = "https://users.roblox.com/v1/usernames/users";
 const THUMBNAILS_URL = "https://thumbnails.roblox.com/v1/users/avatar-headshot";
 
+const ROBLOX_SYSTEM_ROLE_NAME = "Member";
+
 const apiClient = axios.create({
-    headers: {
-        "x-api-key": API_KEY
-    },
-    timeout: 8000
+    headers: { "x-api-key": API_KEY },
+    timeout: 8000,
 });
 
 const publicClient = axios.create({ timeout: 8000 });
@@ -38,6 +38,23 @@ async function _paginate(baseUrl, itemsKey, filter = null) {
     return results;
 }
 
+function _resolveSystemRoleConflict(candidates) {
+    if (candidates.length <= 1) return candidates[0] ?? null;
+
+    const filtered = candidates.filter(r => r.displayName !== ROBLOX_SYSTEM_ROLE_NAME);
+    const pool = filtered.length > 0 ? filtered : candidates;
+
+    const sorted = [...pool].sort((a, b) => Number(a.id) - Number(b.id));
+    const chosen = sorted[0];
+
+    logger.warn(
+        `Resolved duplicate rank ${candidates[0].rank} - ` +
+        `using "${chosen.displayName}" (id=${chosen.id}). ` +
+        `All candidates: [${candidates.map(r => `${r.id}(${r.displayName})`).join(", ")}]`
+    );
+    return chosen;
+}
+
 async function fetchAllRoles(groupId) {
     const cached = getRoles(groupId);
     if (cached) return cached;
@@ -49,7 +66,11 @@ async function fetchAllRoles(groupId) {
     );
 
     const roles = raw
-        .map(role => ({ id: role.id, rank: role.rank, displayName: role.displayName }))
+        .map(role => ({
+            id: role.id,
+            rank: role.rank,
+            displayName: role.displayName,
+        }))
         .sort((a, b) => a.rank - b.rank);
 
     saveRoles(groupId, roles);
@@ -59,17 +80,7 @@ async function fetchAllRoles(groupId) {
 async function fetchRoleByRank(groupId, rank) {
     const roles = await fetchAllRoles(groupId);
     const candidates = roles.filter(r => r.rank === rank);
-
-    if (candidates.length === 0) return null;
-
-    candidates.sort((a, b) => Number(a.id) - Number(b.id));
-
-    if (candidates.length > 1) {
-        logger.warn(`Multiple roles found for rank=${rank} in groupId=${groupId}: [${candidates.map(r => `${r.id}(${r.displayName})`).join(", ")}] - using ${candidates[0].id}(${candidates[0].displayName})`
-        );
-    }
-
-    return candidates[0];
+    return _resolveSystemRoleConflict(candidates);
 }
 
 async function fetchMembership(groupId, userId) {
@@ -112,7 +123,7 @@ async function resolveUser(username) {
                 size: "150x150",
                 format: "Png",
                 isCircular: false,
-            }
+            },
         });
         avatarUrl = thumbRes.data.data?.[0]?.imageUrl ?? null;
     } catch (err) {
@@ -124,19 +135,19 @@ async function resolveUser(username) {
 
 async function assignRole(groupId, membershipId, roleId) {
     logger.info(`Assigning role | groupId=${groupId} membershipId=${membershipId} roleId=${roleId}`);
-    const url = `${GROUPS_URL}/${groupId}/memberships/${membershipId}:assignRole`;
-    const res = await apiClient.post(url, {
-        role: `groups/${groupId}/roles/${roleId}`
-    });
+    const res = await apiClient.post(
+        `${GROUPS_URL}/${groupId}/memberships/${membershipId}:assignRole`,
+        { role: `groups/${groupId}/roles/${roleId}` }
+    );
     return res.data;
 }
 
 async function unassignRole(groupId, membershipId, roleId) {
     logger.info(`Unassigning role | groupId=${groupId} membershipId=${membershipId} roleId=${roleId}`);
-    const url = `${GROUPS_URL}/${groupId}/memberships/${membershipId}:unassignRole`;
-    const res = await apiClient.post(url, {
-        role: `groups/${groupId}/roles/${roleId}`
-    });
+    const res = await apiClient.post(
+        `${GROUPS_URL}/${groupId}/memberships/${membershipId}:unassignRole`,
+        { role: `groups/${groupId}/roles/${roleId}` }
+    );
     return res.data;
 }
 
@@ -145,7 +156,6 @@ async function acceptJoinRequest(groupId, userId) {
         `${GROUPS_URL}/${groupId}/join-requests/${userId}:accept`,
         {}
     );
-
     return res.data;
 }
 
